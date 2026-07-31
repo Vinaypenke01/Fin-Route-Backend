@@ -1,0 +1,1 @@
+"""administration app migrations package."""
