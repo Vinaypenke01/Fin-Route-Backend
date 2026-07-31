@@ -1,14 +1,33 @@
 # FinRoute Backend — Django REST API Engine
 
-FinRoute Backend is a high-performance Python / Django REST Framework API engine powering daily money lending businesses, microfinance operators, field collection agents, and enterprise finance management.
+FinRoute Backend is a high-performance Python / Django REST Framework API engine powering daily money lending businesses, microfinance operators, field collection agents, and enterprise finance management across India.
 
 ---
 
-## 🌟 Key Architecture & Modules
+## 🏗️ Architecture Overview
+
+The backend architecture is built using Django 5.1 and Django REST Framework with strict ORM query scoping per tenant workspace:
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    FinRoute Backend                         │
+│       Python 3.11+ / Django 5.1 / Django REST Framework     │
+└──────────────────────────────┬──────────────────────────────┘
+                               │
+            ┌──────────────────┴──────────────────┐
+            │ Database Layer (Environment Toggle) │
+            ├──────────────────┬──────────────────┤
+            │  SQLite3 (Local) │  PostgreSQL (Cloud)
+            └──────────────────┴──────────────────┘
+```
+
+---
+
+## 🌟 Key Modules & System Capabilities
 
 ### 1. `apps/accounts` (Authentication & Security)
-- **Custom User Model**: Mobile number primary authentication with OTP verification.
-- **Role-Based Access Control**: Supports `guest` (lenders), `admin` (super admins), `field_agent`, and `branch_manager`.
+- **Custom User Model**: Primary mobile number authentication with OTP verification.
+- **Role-Based Access Control (RBAC)**: Supports `guest` (lenders), `admin` (super admins), `field_agent`, and `branch_manager`.
 - **JWT Security**: Token-based authentication using `djangorestframework-simplejwt`.
 - **Management Command**: Quick creation of super admin credentials via `python manage.py create_admin`.
 
@@ -16,7 +35,7 @@ FinRoute Backend is a high-performance Python / Django REST Framework API engine
 - **Borrower & Loan Lifecycle**: Register borrowers with custom principal, interest rates, frequencies, and automated sequence numbers.
 - **Collections & Batch Passbooks**: Record single or multi-borrower batch collections with receipts and status tracking (`paid`, `skipped`).
 - **Atomic Route Auto-Remapping**: Allows lenders to re-configure operational collection days at any time. Automatically re-maps active borrower schedules inside a Django `@transaction.atomic` block while preserving historical receipts.
-- **Plan Upgrade Requests**: Endpoint (`POST /api/v1/app/upgrade/request/`) allowing lenders to request collection day plan upgrades.
+- **Plan Upgrade Requests**: Endpoint (`POST /api/v1/app/upgrade/request/`) allowing lenders to request collection day plan upgrades (saved as `pending`).
 
 ### 3. `apps/administration` (Super Admin Console APIs)
 - **Platform Analytics**: Dashboard metrics, system health status, and active workspace tracking.
@@ -49,12 +68,12 @@ DJANGO_SECRET_KEY=your-django-secret-key
 DJANGO_DEBUG=True
 DJANGO_ALLOWED_HOSTS=localhost,127.0.0.1
 
-# Database Configuration
+# Database Configuration (Set USE_SQLITE=True for local SQLite or USE_SQLITE=False for PostgreSQL)
 USE_SQLITE=True
-DATABASE_URL=postgresql://postgres:123456@localhost:5432/Fintech
-DB_NAME=Fintech
+DATABASE_URL=postgresql://your_user:your_password@localhost:5432/fintech_db
+DB_NAME=fintech_db
 DB_USER=postgres
-DB_PASSWORD=123456
+DB_PASSWORD=your_password
 DB_HOST=localhost
 DB_PORT=5432
 
