@@ -133,6 +133,9 @@ class UserProfileSerializer(serializers.ModelSerializer):
             "full_name",
             "mobile_number",
             "email",
+            "city",
+            "state",
+            "employee_id",
             "account_type",
             "is_mobile_verified",
             "is_email_verified",
@@ -146,7 +149,7 @@ class UserProfileUpdateSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = User
-        fields = ["full_name", "email"]
+        fields = ["full_name", "email", "city", "state", "employee_id"]
 
     def validate_email(self, value):
         request = self.context.get("request")
@@ -182,3 +185,21 @@ class OAuthGoogleSerializer(serializers.Serializer):
 class OAuthMicrosoftSerializer(serializers.Serializer):
     """Input for POST /api/v1/accounts/oauth/microsoft/"""
     code = serializers.CharField(help_text="Microsoft OAuth authorization code.")
+
+
+class UserSessionSerializer(serializers.ModelSerializer):
+    class Meta:
+        from apps.accounts.models import UserSession
+        model = UserSession
+        fields = [
+            "id",
+            "device_name",
+            "device_type",
+            "ip_address",
+            "user_agent",
+            "last_activity_at",
+            "expires_at",
+            "is_active",
+            "created_at",
+        ]
+        read_only_fields = fields

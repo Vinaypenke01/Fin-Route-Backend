@@ -17,6 +17,10 @@ from apps.accounts.views import (
     ResetPasswordView,
     ChangePasswordView,
     MeView,
+    UserActivityView,
+    UserSessionListView,
+    UserSessionRevokeView,
+    UserSessionRevokeAllView,
 )
 
 urlpatterns = [
@@ -38,6 +42,12 @@ urlpatterns = [
     path("password/reset/", ResetPasswordView.as_view(), name="auth-password-reset"),
     path("password/change/", ChangePasswordView.as_view(), name="auth-password-change"),
 
-    # Current User Profile
+    # Current User Profile & Activity Log
     path("me/", MeView.as_view(), name="auth-me"),
+    path("me/activity/", UserActivityView.as_view(), name="auth-me-activity"),
+
+    # Active Sessions & Device Management
+    path("sessions/", UserSessionListView.as_view(), name="auth-sessions"),
+    path("sessions/<int:session_id>/", UserSessionRevokeView.as_view(), name="auth-sessions-revoke"),
+    path("sessions/revoke-all/", UserSessionRevokeAllView.as_view(), name="auth-sessions-revoke-all"),
 ]

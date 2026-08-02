@@ -204,14 +204,26 @@ class GuestWorkspaceService:
     @transaction.atomic
     def update_workspace(workspace: GuestWorkspace, validated_data: dict) -> GuestWorkspace:
         """Update workspace settings and auto-remap customer collection routes when operating days change."""
-        allowed_fields = ["name", "business_category", "mobile_number", "logo",
-                         "address", "city", "state", "pin_code", "allowed_collection_days"]
-        
+        allowed_fields = [
+            "name",
+            "business_category",
+            "mobile_number",
+            "gstin",
+            "business_type",
+            "owner_pan",
+            "logo",
+            "address",
+            "city",
+            "state",
+            "pin_code",
+            "allowed_collection_days",
+        ]
+
         old_days = workspace.allowed_collection_days or []
         new_days = validated_data.get("allowed_collection_days")
 
         for field in allowed_fields:
-            if field in validated_data:
+            if field in validated_data and hasattr(workspace, field):
                 setattr(workspace, field, validated_data[field])
         workspace.save()
 

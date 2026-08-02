@@ -271,6 +271,126 @@ class MeView(APIView):
         return success_response(data=output.data, message="Profile updated successfully.")
 
 
+class UserActivityView(APIView):
+    """GET /api/v1/auth/me/activity/ — Fetch user's recent audit activities with filters & pagination"""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        from apps.audit_logs.models import AuditLog
+        from apps.audit_logs.serializers import AuditLogSerializer
+        from django.db.models import Q
+
+        queryset = AuditLog.objects.filter(user=request.user).order_by("-created_at")
+
+        action = request.query_params.get("action")
+        if action and action != "all":
+            queryset = queryset.filter(action__iexact=action)
+
+        search = request.query_params.get("search")
+        if search:
+            queryset = queryset.filter(
+                Q(description__icontains=search) | Q(target_model__icontains=search)
+            )
+
+        date_str = request.query_params.get("date")
+        if date_str:
+            queryset = queryset.filter(created_at__date=date_str)
+
+        day = request.query_params.get("day")
+        if day and day != "all":
+            day_map = {"monday": 2, "tuesday": 3, "wednesday": 4, "thursday": 5, "friday": 6, "saturday": 7, "sunday": 1}
+            if day.lower() in day_map:
+                queryset = queryset.filter(created_at__week_day=day_map[day.lower()])
+
+        from apps.common.pagination import StandardPagination
+        paginator = StandardPagination()
+        page = paginator.paginate_queryset(queryset, request)
+        serializer = AuditLogSerializer(page, many=True)
+        return paginator.get_paginated_response(serializer.data)
+
+
+# ─── Sessions & Devices ────────────────────────────────────────────────────────
+
+class UserSessionListView(APIView):
+    """GET /api/v1/auth/sessions/ — List all active sessions for current user with pagination"""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        from apps.accounts.models import UserSession
+        from apps.accounts.serializers import UserSessionSerializer
+        from django.db.models import Q
+
+        queryset = UserSession.objects.filter(user=request.user, is_active=True).order_by("-last_activity_at")
+
+        search = request.query_params.get("search")
+        if search:
+            queryset = queryset.filter(
+                Q(device_name__icontains=search) |
+                Q(device_type__icontains=search) |
+                Q(user_agent__icontains=search) |
+                Q(ip_address__icontains=search)
+            )
+
+        from apps.common.pagination import StandardPagination
+        paginator = StandardPagination()
+        page = paginator.paginate_queryset(queryset, request)
+        serializer = UserSessionSerializer(page, many=True)
+        return paginator.get_paginated_response(serializer.data)
+
+
+class UserSessionRevokeView(APIView):
+    """DELETE /api/v1/auth/sessions/<int:session_id>/ — Revoke a specific session/device"""
+    permission_classes = [IsAuthenticated]
+
+    def delete(self, request, session_id):
+        from apps.accounts.models import UserSession
+        from django.utils import timezone
+        from apps.audit_logs.services import AuditLogService
+        from apps.audit_logs.models import ActionType
+
+        try:
+            session = UserSession.objects.get(id=session_id, user=request.user)
+            session.is_active = False
+            session.revoked_at = timezone.now()
+            session.save()
+
+            AuditLogService.log_action(
+                user=request.user,
+                action=ActionType.LOGOUT,
+                target_model="UserSession",
+                target_id=str(session.id),
+                description=f"Revoked device session: {session.device_name or session.user_agent[:30]}",
+            )
+            return success_response(message="Device session revoked successfully.")
+        except UserSession.DoesNotExist:
+            return error_response(message="Session not found.")
+
+
+class UserSessionRevokeAllView(APIView):
+    """POST /api/v1/auth/sessions/revoke-all/ — Revoke all other active sessions"""
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        from apps.accounts.models import UserSession
+        from django.utils import timezone
+        from apps.audit_logs.services import AuditLogService
+        from apps.audit_logs.models import ActionType
+
+        updated_count = UserSession.objects.filter(user=request.user, is_active=True).update(
+            is_active=False,
+            revoked_at=timezone.now(),
+        )
+
+        AuditLogService.log_action(
+            user=request.user,
+            action=ActionType.LOGOUT,
+            target_model="UserSession",
+            description=f"Signed out of all {updated_count} active sessions/devices",
+        )
+
+        return success_response(message=f"Successfully signed out of {updated_count} session(s).")
+
+
 # ─── Contact Inquiry ──────────────────────────────────────────────────────────
 
 class ContactInquiryCreateView(APIView):

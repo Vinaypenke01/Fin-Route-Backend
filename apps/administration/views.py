@@ -103,7 +103,7 @@ class AdminWorkspaceListView(APIView):
         if not serializer.is_valid():
             return error_response(errors=serializer.errors)
 
-        workspace = AdminService.create_lender_workspace(serializer.validated_data)
+        workspace = AdminService.create_lender_workspace(serializer.validated_data, admin_user=request.user)
         return success_response(
             data=AdminWorkspaceListSerializer(workspace).data,
             message="Lender workspace registered successfully.",

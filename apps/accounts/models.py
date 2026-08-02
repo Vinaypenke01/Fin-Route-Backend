@@ -77,6 +77,11 @@ class User(AbstractBaseUser, PermissionsMixin):
         help_text="Set to True after email link verification.",
     )
 
+    # --- Location & Employment Details ---
+    city = models.CharField(max_length=100, blank=True, null=True, default="")
+    state = models.CharField(max_length=100, blank=True, null=True, default="")
+    employee_id = models.CharField(max_length=50, blank=True, null=True, default="")
+
     # --- Account Status ---
     is_active = models.BooleanField(
         default=True,

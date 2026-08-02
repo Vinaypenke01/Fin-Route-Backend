@@ -23,6 +23,7 @@ from apps.guest_workspace.views import (
     CalculatorView,
     UpgradeView,
     SubmitUpgradeRequestView,
+    WorkspaceDataBackupView,
 )
 
 urlpatterns = [
@@ -53,9 +54,10 @@ urlpatterns = [
     path("reports/expenses/", ReportsExpensesView.as_view(), name="app-reports-expenses"),
     path("reports/export/", ReportsExportView.as_view(), name="app-reports-export"),
 
-    # Calculator & Upgrade
+    # Calculator, Upgrade & Backup
     path("calculator/", CalculatorView.as_view(), name="app-calculator"),
     path("upgrade/", UpgradeView.as_view(), name="app-upgrade"),
     path("upgrade/plans/", UpgradeView.as_view(), name="app-upgrade-plans"),
     path("upgrade/request/", SubmitUpgradeRequestView.as_view(), name="app-upgrade-request"),
+    path("backup/download/", WorkspaceDataBackupView.as_view(), name="app-backup-download"),
 ]

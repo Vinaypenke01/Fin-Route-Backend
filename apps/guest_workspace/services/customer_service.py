@@ -103,6 +103,16 @@ class CustomerService:
                if k not in ("total_due", "outstanding_balance", "is_existing_borrower", "total_installments", "installments_paid_count", "remaining_installments_count", "amount_already_collected", "installment_amount", "notes", "collection_frequency", "interest_type")},
         )
 
+        from apps.audit_logs.services import AuditLogService
+        from apps.audit_logs.models import ActionType
+        AuditLogService.log_action(
+            user=created_by or workspace.owner,
+            action=ActionType.CREATE,
+            target_model="CustomerProfile",
+            target_id=str(customer.public_id),
+            description=f"Added new borrower '{customer.full_name}' ({customer.customer_code}) with loan amount ₹{customer.loan_amount}",
+        )
+
         logger.info(
             "Customer created: code=%s workspace=%s",
             customer_code,

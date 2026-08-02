@@ -81,6 +81,9 @@ class GuestWorkspace(BasePublicModel):
     city = models.CharField(max_length=100, blank=True)
     state = models.CharField(max_length=100, blank=True)
     pin_code = models.CharField(max_length=10, blank=True)
+    gstin = models.CharField(max_length=20, blank=True, null=True, default="")
+    business_type = models.CharField(max_length=100, blank=True, null=True, default="")
+    owner_pan = models.CharField(max_length=20, blank=True, null=True, default="")
 
     # --- Subscription ---
     subscription_plan = models.CharField(

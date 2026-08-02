@@ -131,6 +131,9 @@ class AccountService:
             "full_name": user.full_name,
             "mobile_number": user.mobile_number,
             "email": user.email,
+            "city": getattr(user, "city", "") or "",
+            "state": getattr(user, "state", "") or "",
+            "employee_id": getattr(user, "employee_id", "") or "",
             "account_type": user.account_type,
             "is_mobile_verified": user.is_mobile_verified,
             "is_email_verified": user.is_email_verified,
@@ -143,13 +146,26 @@ class AccountService:
         Update editable profile fields.
         Mobile number and account_type changes are handled by separate flows.
         """
-        allowed_fields = ["full_name", "email"]
+        allowed_fields = ["full_name", "email", "city", "state", "employee_id"]
+        update_fields = ["updated_at"]
+
         for field in allowed_fields:
-            if field in validated_data:
+            if field in validated_data and hasattr(user, field):
                 setattr(user, field, validated_data[field])
+                update_fields.append(field)
 
         user.updated_at = timezone.now()
-        user.save(update_fields=["full_name", "email", "updated_at"])
+        user.save(update_fields=update_fields)
+
+        from apps.audit_logs.services import AuditLogService
+        from apps.audit_logs.models import ActionType
+        AuditLogService.log_action(
+            user=user,
+            action=ActionType.UPDATE,
+            target_model="User",
+            target_id=str(user.public_id),
+            description="Updated personal profile details",
+        )
 
         logger.info("Profile updated for user=%s", user.mobile_number)
         return user
@@ -167,6 +183,17 @@ class AccountService:
 
         user.set_password(new_password)
         user.save(update_fields=["password", "updated_at"])
+
+        from apps.audit_logs.services import AuditLogService
+        from apps.audit_logs.models import ActionType
+        AuditLogService.log_action(
+            user=user,
+            action=ActionType.UPDATE,
+            target_model="User",
+            target_id=str(user.public_id),
+            description="Updated account password",
+        )
+
         logger.info("Password changed for user=%s", user.mobile_number)
 
     @staticmethod

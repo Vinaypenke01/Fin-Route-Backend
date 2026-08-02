@@ -99,6 +99,16 @@ class CollectionService:
         # Update customer balance and installment counters
         CustomerService.recalculate_outstanding(customer)
 
+        from apps.audit_logs.services import AuditLogService
+        from apps.audit_logs.models import ActionType
+        AuditLogService.log_action(
+            user=collected_by or workspace.owner,
+            action=ActionType.CREATE,
+            target_model="CollectionEntry",
+            target_id=str(collection.receipt_number),
+            description=f"Recorded collection payment of ₹{collection.collected_amount} for borrower '{customer.full_name}' (Receipt #{collection.receipt_number})",
+        )
+
         logger.info(
             "Collection recorded: receipt=%s customer=%s amount=%s collected_by=%s",
             receipt,

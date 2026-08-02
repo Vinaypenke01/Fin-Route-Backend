@@ -71,6 +71,18 @@ class AuthService:
             status=LoginStatus.SUCCESS,
         )
 
+        from apps.audit_logs.services import AuditLogService
+        from apps.audit_logs.models import ActionType
+        AuditLogService.log_action(
+            user=user,
+            action=ActionType.LOGIN,
+            target_model="User",
+            target_id=str(user.public_id),
+            description=f"User logged in from {user_agent or 'web browser'}",
+            ip_address=ip,
+            user_agent=user_agent,
+        )
+
         User.objects.filter(pk=user.pk).update(last_login=timezone.now())
 
         workspace_data = cls._get_workspace_summary(user)

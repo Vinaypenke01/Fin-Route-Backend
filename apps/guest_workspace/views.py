@@ -674,3 +674,50 @@ class SubmitUpgradeRequestView(APIView):
             data=PlanUpgradeRequestSerializer(req_obj).data,
             message="Upgrade request submitted successfully. Pending admin approval.",
         )
+
+
+class WorkspaceDataBackupView(APIView):
+    """
+    GET /api/v1/app/backup/download/
+    Generates and downloads a complete JSON data backup of all workspace records
+    (Customers, Loans, Collections, Expenses, Business Details) for offline safety.
+    """
+    permission_classes = [IsAuthenticated, IsGuestUser]
+
+    def get(self, request):
+        import json
+        from django.utils import timezone
+        from apps.guest_workspace.models import CustomerProfile, CollectionEntry, Expense
+        from apps.guest_workspace.serializers import CustomerProfileSerializer, CollectionEntrySerializer, ExpenseSerializer, GuestWorkspaceSerializer
+        from apps.audit_logs.services import AuditLogService
+        from apps.audit_logs.models import ActionType
+
+        workspace = GuestWorkspaceService.get_workspace(request.user)
+
+        customers = CustomerProfile.objects.filter(workspace=workspace)
+        collections = CollectionEntry.objects.filter(workspace=workspace)
+        expenses = Expense.objects.filter(workspace=workspace)
+
+        backup_payload = {
+            "version": "1.0",
+            "backup_timestamp": timezone.now().isoformat(),
+            "workspace": GuestWorkspaceSerializer(workspace).data,
+            "customers_count": customers.count(),
+            "customers": CustomerProfileSerializer(customers, many=True).data,
+            "collections_count": collections.count(),
+            "collections": CollectionEntrySerializer(collections, many=True).data,
+            "expenses_count": expenses.count(),
+            "expenses": ExpenseSerializer(expenses, many=True).data,
+        }
+
+        AuditLogService.log_action(
+            user=request.user,
+            action=ActionType.EXPORT,
+            target_model="GuestWorkspace",
+            target_id=str(workspace.public_id),
+            description=f"Downloaded complete workspace data backup ({customers.count()} borrowers, {collections.count()} collections)",
+        )
+
+        response = HttpResponse(json.dumps(backup_payload, indent=2), content_type="application/json")
+        response["Content-Disposition"] = f'attachment; filename="finroute_backup_{workspace.id}_{timezone.now().strftime("%Y%m%d_%H%M%S")}.json"'
+        return response

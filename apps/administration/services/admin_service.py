@@ -77,7 +77,7 @@ class AdminService:
 
     @staticmethod
     @transaction.atomic
-    def create_lender_workspace(data: dict) -> GuestWorkspace:
+    def create_lender_workspace(data: dict, admin_user=None) -> GuestWorkspace:
         """
         Atomically creates a new Lender User account and associated GuestWorkspace.
         Called by Super Admin.
@@ -121,6 +121,16 @@ class AdminService:
             workspace.subscription_plan = data.get("subscription_plan", workspace.subscription_plan)
             workspace.status = data.get("status", workspace.status)
             workspace.save()
+
+        from apps.audit_logs.services import AuditLogService
+        from apps.audit_logs.models import ActionType
+        AuditLogService.log_action(
+            user=admin_user,
+            action=ActionType.CREATE,
+            target_model="GuestWorkspace",
+            target_id=str(workspace.public_id),
+            description=f"Created guest/lender workspace '{workspace.name}' for {user.full_name} ({user.mobile_number})",
+        )
 
         logger.info("Super Admin created or updated Lender workspace: %s (%s)", workspace.name, mobile_number)
         return workspace
