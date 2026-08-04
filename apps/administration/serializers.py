@@ -18,6 +18,14 @@ class AdminWorkspaceListSerializer(serializers.ModelSerializer):
     owner_email = serializers.CharField(source="owner.email", read_only=True)
     customer_count = serializers.IntegerField(read_only=True)
 
+    allowed_collection_days = serializers.JSONField(read_only=True)
+    configured_days_count = serializers.SerializerMethodField()
+    max_collection_days = serializers.IntegerField(source="max_allowed_collection_days", read_only=True)
+    purchased_additional_days = serializers.IntegerField(read_only=True)
+    max_customers = serializers.IntegerField(source="max_allowed_customers", read_only=True)
+    day_wise_customer_counts = serializers.SerializerMethodField()
+    total_outstanding_amount = serializers.SerializerMethodField()
+
     class Meta:
         model = GuestWorkspace
         fields = [
@@ -34,9 +42,52 @@ class AdminWorkspaceListSerializer(serializers.ModelSerializer):
             "status",
             "max_customers_override",
             "max_collection_days_override",
+            "allowed_collection_days",
+            "configured_days_count",
+            "max_collection_days",
+            "purchased_additional_days",
+            "max_customers",
             "customer_count",
+            "day_wise_customer_counts",
+            "total_outstanding_amount",
             "created_at",
         ]
+
+    def get_configured_days_count(self, obj):
+        return len(obj.allowed_collection_days or [])
+
+    def get_day_wise_customer_counts(self, obj):
+        from apps.guest_workspace.models import CustomerProfile
+        from django.db.models import Count
+
+        counts = (
+            CustomerProfile.objects.filter(workspace=obj)
+            .values("collection_day")
+            .annotate(count=Count("id"))
+        )
+        day_map = {
+            "monday": 0,
+            "tuesday": 0,
+            "wednesday": 0,
+            "thursday": 0,
+            "friday": 0,
+            "saturday": 0,
+            "sunday": 0,
+            "unassigned": 0,
+        }
+        for item in counts:
+            day = (item["collection_day"] or "unassigned").lower().strip()
+            if day in day_map:
+                day_map[day] = item["count"]
+            else:
+                day_map["unassigned"] += item["count"]
+        return day_map
+
+    def get_total_outstanding_amount(self, obj):
+        from apps.guest_workspace.models import CustomerProfile
+        from django.db.models import Sum
+        val = CustomerProfile.objects.filter(workspace=obj).aggregate(total=Sum("outstanding_balance"))["total"]
+        return float(val or 0)
 
 
 class AdminLenderCreateSerializer(serializers.Serializer):
@@ -74,6 +125,9 @@ class AdminLenderCreateSerializer(serializers.Serializer):
 
 
 class AdminLenderUpdateSerializer(serializers.Serializer):
+    owner_name = serializers.CharField(max_length=150, required=False)
+    owner_email = serializers.EmailField(required=False, allow_blank=True, allow_null=True)
+    owner_mobile = serializers.CharField(max_length=15, required=False)
     name = serializers.CharField(max_length=200, required=False)
     address = serializers.CharField(required=False, allow_blank=True)
     city = serializers.CharField(max_length=100, required=False, allow_blank=True)

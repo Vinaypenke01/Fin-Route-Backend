@@ -147,6 +147,22 @@ class AdminService:
             raise WorkspaceNotFoundException()
 
         update_fields = []
+        owner_fields = []
+        if "owner_name" in data and workspace.owner:
+            workspace.owner.full_name = data["owner_name"]
+            owner_fields.append("full_name")
+        if "owner_email" in data and workspace.owner:
+            workspace.owner.email = data["owner_email"]
+            owner_fields.append("email")
+        if "owner_mobile" in data and workspace.owner:
+            workspace.owner.mobile_number = data["owner_mobile"]
+            owner_fields.append("mobile_number")
+            workspace.mobile_number = data["owner_mobile"]
+            update_fields.append("mobile_number")
+
+        if owner_fields and workspace.owner:
+            workspace.owner.save(update_fields=owner_fields)
+
         for field in [
             "name", "address", "city", "state", "pin_code",
             "subscription_plan", "status",

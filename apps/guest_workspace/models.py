@@ -371,6 +371,14 @@ class CollectionEntry(BasePublicModel):
         db_index=True,
         help_text="True if collected today, False if past/backdated collection.",
     )
+    is_edited = models.BooleanField(
+        default=False,
+        help_text="True if this collection entry record/date was edited once.",
+    )
+    edit_count = models.PositiveIntegerField(
+        default=0,
+        help_text="Number of times this collection entry was edited (Max allowed: 1).",
+    )
 
     # --- Receipt ---
     receipt_number = models.CharField(

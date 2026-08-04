@@ -304,7 +304,7 @@ class CollectionDetailView(APIView):
             return error_response(errors=serializer.errors)
 
         collection = CollectionService.update_collection(
-            workspace, public_id, serializer.validated_data
+            workspace, public_id, serializer.validated_data, updated_by=request.user
         )
         return success_response(
             data=CollectionListSerializer(collection).data,

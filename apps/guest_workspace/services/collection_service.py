@@ -243,17 +243,60 @@ class CollectionService:
         workspace: GuestWorkspace,
         collection_public_id: str,
         validated_data: dict,
+        updated_by=None,
     ) -> CollectionEntry:
         """Update a collection entry and recalculate the customer balance."""
         collection = CollectionService.get_collection_detail(workspace, collection_public_id)
 
-        allowed_fields = ["collected_amount", "status", "payment_mode", "remarks"]
+        if collection.is_edited or collection.edit_count >= 1:
+            raise BusinessRuleException("This collection entry has already been edited once and cannot be modified again.")
+
+        changes = {}
+        allowed_fields = ["collection_date", "collected_amount", "expected_amount", "remarks"]
+        
         for field in allowed_fields:
             if field in validated_data:
-                setattr(collection, field, validated_data[field])
+                old_val = str(getattr(collection, field))
+                new_val = str(validated_data[field])
+                if old_val != new_val:
+                    changes[field] = {"old": old_val, "new": new_val}
+                    setattr(collection, field, validated_data[field])
+
+        if "status" in validated_data:
+            st_id = validated_data["status"]
+            if collection.status_id != st_id:
+                changes["status"] = {"old": str(collection.status_id), "new": str(st_id)}
+                collection.status_id = st_id
+
+        if "payment_mode" in validated_data:
+            mode_id = validated_data["payment_mode"]
+            if collection.payment_mode_id != mode_id:
+                changes["payment_mode"] = {"old": str(collection.payment_mode_id), "new": str(mode_id)}
+                collection.payment_mode_id = mode_id
+
+        if changes:
+            collection.is_edited = True
+            collection.edit_count += 1
+
         collection.save()
 
+        # Recalculate customer balance & counters
         CustomerService.recalculate_outstanding(collection.customer)
+
+        # Record explicit audit log
+        if changes:
+            from apps.audit_logs.services import AuditLogService
+            from apps.audit_logs.models import ActionType
+            desc_parts = [f"{k}: {v['old']} ➔ {v['new']}" for k, v in changes.items()]
+            AuditLogService.log_action(
+                user=updated_by or workspace.owner,
+                action=ActionType.UPDATE,
+                target_model="CollectionEntry",
+                target_id=str(collection.receipt_number),
+                description=f"Updated collection receipt #{collection.receipt_number} for '{collection.customer.full_name}' ({', '.join(desc_parts)})",
+                changes=changes,
+            )
+
         return collection
 
     @staticmethod

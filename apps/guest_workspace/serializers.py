@@ -102,6 +102,7 @@ class CustomerProfileListSerializer(serializers.ModelSerializer):
     public_id = serializers.UUIDField(read_only=True)
     collection_frequency_name = serializers.CharField(source="collection_frequency.name", read_only=True)
     interest_type_name = serializers.CharField(source="interest_type.name", read_only=True)
+    skipped_installments_count = serializers.SerializerMethodField()
 
     class Meta:
         model = CustomerProfile
@@ -125,15 +126,21 @@ class CustomerProfileListSerializer(serializers.ModelSerializer):
             "total_installments",
             "installments_paid_count",
             "remaining_installments_count",
+            "skipped_installments_count",
             "amount_already_collected",
             "installment_amount",
             "status",
             "start_date",
         ]
 
+    def get_skipped_installments_count(self, obj):
+        from django.db.models import Q
+        return obj.collections.filter(Q(status__code="skipped") | Q(status__name__icontains="skipped")).count()
+
 
 class CustomerProfileDetailSerializer(serializers.ModelSerializer):
     public_id = serializers.UUIDField(read_only=True)
+    skipped_installments_count = serializers.SerializerMethodField()
 
     class Meta:
         model = CustomerProfile
@@ -163,6 +170,7 @@ class CustomerProfileDetailSerializer(serializers.ModelSerializer):
             "total_installments",
             "installments_paid_count",
             "remaining_installments_count",
+            "skipped_installments_count",
             "amount_already_collected",
             "installment_amount",
             "start_date",
@@ -172,6 +180,10 @@ class CustomerProfileDetailSerializer(serializers.ModelSerializer):
             "created_at",
         ]
         read_only_fields = ["public_id", "customer_code", "total_due", "outstanding_balance", "created_at"]
+
+    def get_skipped_installments_count(self, obj):
+        from django.db.models import Q
+        return obj.collections.filter(Q(status__code="skipped") | Q(status__name__icontains="skipped")).count()
 
 
 class CustomerCreateUpdateSerializer(serializers.Serializer):
@@ -219,10 +231,23 @@ class CollectionListSerializer(serializers.ModelSerializer):
     customer_code = serializers.CharField(source="customer.customer_code", read_only=True)
     customer_name = serializers.CharField(source="customer.full_name", read_only=True)
     customer_public_id = serializers.UUIDField(source="customer.public_id", read_only=True)
+    customer_start_date = serializers.DateField(source="customer.start_date", read_only=True)
+    disbursed_date = serializers.DateField(source="customer.start_date", read_only=True)
+    total_installments = serializers.IntegerField(source="customer.total_installments", read_only=True)
+    installments_paid_count = serializers.IntegerField(source="customer.installments_paid_count", read_only=True)
+    remaining_installments_count = serializers.IntegerField(source="customer.remaining_installments_count", read_only=True)
+    outstanding_balance = serializers.DecimalField(source="customer.outstanding_balance", max_digits=12, decimal_places=2, read_only=True)
+    skipped_installments_count = serializers.SerializerMethodField()
     status_code = serializers.CharField(source="status.code", read_only=True)
     status_name = serializers.CharField(source="status.name", read_only=True)
     payment_mode_name = serializers.CharField(source="payment_mode.name", read_only=True)
     is_collected_today = serializers.BooleanField(default=True, read_only=True)
+
+    def get_skipped_installments_count(self, obj):
+        if not obj.customer:
+            return 0
+        from django.db.models import Q
+        return obj.customer.collections.filter(Q(status__code="skipped") | Q(status__name__icontains="skipped")).count()
 
     class Meta:
         model = CollectionEntry
@@ -232,6 +257,13 @@ class CollectionListSerializer(serializers.ModelSerializer):
             "customer_code",
             "customer_name",
             "customer_public_id",
+            "disbursed_date",
+            "customer_start_date",
+            "total_installments",
+            "installments_paid_count",
+            "remaining_installments_count",
+            "outstanding_balance",
+            "skipped_installments_count",
             "collection_date",
             "expected_amount",
             "collected_amount",
@@ -242,22 +274,30 @@ class CollectionListSerializer(serializers.ModelSerializer):
             "payment_mode_name",
             "remarks",
             "is_collected_today",
+            "is_edited",
+            "edit_count",
             "created_at",
         ]
 
 
 class CollectionCreateSerializer(serializers.Serializer):
-    customer = serializers.UUIDField(help_text="Customer public_id UUID")
-    collection_date = serializers.DateField()
-    expected_amount = serializers.DecimalField(max_digits=12, decimal_places=2)
-    collected_amount = serializers.DecimalField(max_digits=12, decimal_places=2)
-    status = serializers.IntegerField(help_text="CollectionStatus PK ID")
+    customer = serializers.UUIDField(required=False, help_text="Customer public_id UUID")
+    collection_date = serializers.DateField(required=False)
+    expected_amount = serializers.DecimalField(required=False, max_digits=12, decimal_places=2)
+    collected_amount = serializers.DecimalField(required=False, max_digits=12, decimal_places=2)
+    status = serializers.IntegerField(required=False, help_text="CollectionStatus PK ID")
     payment_mode = serializers.IntegerField(required=False, allow_null=True, help_text="PaymentMode PK ID")
     remarks = serializers.CharField(required=False, allow_blank=True)
     is_collected_today = serializers.BooleanField(required=False, default=True)
 
     def validate(self, attrs):
-        validate_positive_amount(attrs["collected_amount"])
+        if not self.partial:
+            for field in ["customer", "collection_date", "expected_amount", "collected_amount", "status"]:
+                if field not in attrs:
+                    raise serializers.ValidationError({field: "This field is required."})
+
+        if "collected_amount" in attrs and attrs["collected_amount"] is not None:
+            validate_positive_amount(attrs["collected_amount"])
         return attrs
 
 
