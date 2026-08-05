@@ -24,6 +24,9 @@ from apps.guest_workspace.views import (
     UpgradeView,
     SubmitUpgradeRequestView,
     WorkspaceDataBackupView,
+    CapitalEntryView,
+    CapitalEntryDetailView,
+    DailyCashReconciliationView,
 )
 
 urlpatterns = [
@@ -48,6 +51,11 @@ urlpatterns = [
     path("expenses/", ExpenseListCreateView.as_view(), name="app-expense-list-create"),
     path("expenses/<uuid:public_id>/", ExpenseDetailView.as_view(), name="app-expense-detail"),
 
+    # Capital & Cash Reconciliation
+    path("capital/", CapitalEntryView.as_view(), name="app-capital-list-create"),
+    path("capital/<uuid:public_id>/", CapitalEntryDetailView.as_view(), name="app-capital-detail"),
+    path("cash-reconciliation/", DailyCashReconciliationView.as_view(), name="app-cash-reconciliation"),
+
     # Reports
     path("reports/collections/", ReportsCollectionsView.as_view(), name="app-reports-collections"),
     path("reports/customers/", ReportsCustomersView.as_view(), name="app-reports-customers"),
@@ -58,6 +66,6 @@ urlpatterns = [
     path("calculator/", CalculatorView.as_view(), name="app-calculator"),
     path("upgrade/", UpgradeView.as_view(), name="app-upgrade"),
     path("upgrade/plans/", UpgradeView.as_view(), name="app-upgrade-plans"),
-    path("upgrade/request/", SubmitUpgradeRequestView.as_view(), name="app-upgrade-request"),
+    path("upgrade/submit/", SubmitUpgradeRequestView.as_view(), name="app-upgrade-submit"),
     path("backup/download/", WorkspaceDataBackupView.as_view(), name="app-backup-download"),
 ]

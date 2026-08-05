@@ -472,3 +472,49 @@ class Expense(BasePublicModel):
 
     def __str__(self):
         return f"Expense({self.workspace.name}, {self.category.name}, {self.amount})"
+
+
+# ─── Capital Entries (Opening Cash / Inflows) ─────────────────────────────────
+
+class CapitalEntry(BasePublicModel):
+    """
+    Represents starting route cash or capital injection added by the lender for a given date.
+    Used for daily cash reconciliation: (Collections + Capital) - (Disbursements + Expenses).
+    """
+
+    workspace = models.ForeignKey(
+        GuestWorkspace,
+        on_delete=models.CASCADE,
+        related_name="capital_entries",
+        db_index=True,
+    )
+    entry_date = models.DateField(
+        db_index=True,
+        help_text="The date this starting cash/capital was injected for.",
+    )
+    amount = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        help_text="The amount of capital/cash added.",
+    )
+    remarks = models.TextField(
+        blank=True,
+        help_text="Optional description e.g. Starting cash brought from home/bank.",
+    )
+    added_by = models.ForeignKey(
+        "accounts.User",
+        on_delete=models.PROTECT,
+        related_name="capital_entries",
+    )
+
+    class Meta:
+        verbose_name = "Capital Entry"
+        verbose_name_plural = "Capital Entries"
+        ordering = ["-entry_date", "-created_at"]
+        indexes = [
+            models.Index(fields=["workspace", "entry_date"]),
+        ]
+
+    def __str__(self):
+        return f"CapitalEntry({self.workspace.name}, {self.entry_date}, ₹{self.amount})"
+

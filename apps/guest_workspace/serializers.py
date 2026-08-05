@@ -16,6 +16,7 @@ from apps.guest_workspace.models import (
     CustomerProfile,
     CollectionEntry,
     Expense,
+    CapitalEntry,
     CustomerStatus,
 )
 
@@ -362,3 +363,32 @@ class CalculatorRequestSerializer(serializers.Serializer):
     frequency = serializers.ChoiceField(choices=["daily", "weekly", "monthly"])
     duration = serializers.IntegerField(min_value=1, max_value=365)
     start_date = serializers.DateField(required=False, allow_null=True)
+
+
+# ─── Capital Entries & Cash Reconciliation Serializers ────────────────────────
+
+class CapitalEntrySerializer(serializers.ModelSerializer):
+    public_id = serializers.UUIDField(read_only=True)
+    added_by_name = serializers.CharField(source="added_by.get_full_name", read_only=True)
+
+    class Meta:
+        model = CapitalEntry
+        fields = [
+            "public_id",
+            "entry_date",
+            "amount",
+            "remarks",
+            "added_by_name",
+            "created_at",
+        ]
+
+
+class CapitalEntryCreateSerializer(serializers.Serializer):
+    entry_date = serializers.DateField()
+    amount = serializers.DecimalField(max_digits=12, decimal_places=2)
+    remarks = serializers.CharField(required=False, allow_blank=True)
+
+    def validate_amount(self, value):
+        validate_positive_amount(value)
+        return value
+

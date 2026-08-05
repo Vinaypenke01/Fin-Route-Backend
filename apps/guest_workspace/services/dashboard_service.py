@@ -17,6 +17,7 @@ from apps.guest_workspace.models import (
     CustomerProfile,
     CollectionEntry,
     Expense,
+    CapitalEntry,
     CustomerStatus,
 )
 
@@ -42,6 +43,23 @@ class DashboardService:
             total_customers=Count("id"),
             active_loans=Count("id", filter=Q(status=CustomerStatus.ACTIVE)),
             total_outstanding=Sum("outstanding_balance"),
+        )
+
+        # Loan Disbursements Today & This Week
+        disbursements_agg = CustomerProfile.objects.filter(
+            workspace=workspace,
+            start_date=today,
+        ).aggregate(
+            total_disbursed=Sum("disbursed_amount"),
+            count=Count("id"),
+        )
+
+        # Capital Injections / Opening Cash Today
+        capital_agg = CapitalEntry.objects.filter(
+            workspace=workspace,
+            entry_date=today,
+        ).aggregate(
+            total_capital=Sum("amount"),
         )
 
         # Collections Today
@@ -79,15 +97,28 @@ class DashboardService:
             total_expense=Sum("amount")
         )
 
+        amount_collected_today = float(today_collections["total_collected"] or 0)
+        disbursements_today = float(disbursements_agg["total_disbursed"] or 0)
+        expenses_today = float(today_expenses["total_expense"] or 0)
+        capital_today = float(capital_agg["total_capital"] or 0)
+
+        # Net Route Cash Position: (Collected + Capital) - (Disbursements + Expenses)
+        net_cash_today = (amount_collected_today + capital_today) - (disbursements_today + expenses_today)
+
         return {
             "total_customers": customer_agg["total_customers"] or 0,
             "active_loans": customer_agg["active_loans"] or 0,
             "collections_today": today_collections["count"] or 0,
-            "amount_collected_today": float(today_collections["total_collected"] or 0),
+            "amount_collected_today": amount_collected_today,
             "amount_collected_this_week": float(weekly_collections["total_collected"] or 0),
+            "disbursements_today": disbursements_today,
+            "new_borrowers_today": disbursements_agg["count"] or 0,
+            "capital_today": capital_today,
+            "expenses_today": expenses_today,
+            "net_cash_today": net_cash_today,
+            "is_cash_deficit": net_cash_today < 0,
             "outstanding_balance": float(customer_agg["total_outstanding"] or 0),
             "pending_today": today_collections["pending_count"] or 0,
-            "expenses_today": float(today_expenses["total_expense"] or 0),
             "expenses_this_month": float(monthly_expenses["total_expense"] or 0),
         }
 

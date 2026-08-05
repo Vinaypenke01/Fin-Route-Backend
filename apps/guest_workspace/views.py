@@ -32,6 +32,8 @@ from apps.guest_workspace.serializers import (
     ExpenseListSerializer,
     ExpenseCreateSerializer,
     CalculatorRequestSerializer,
+    CapitalEntrySerializer,
+    CapitalEntryCreateSerializer,
 )
 from apps.guest_workspace.services import (
     GuestWorkspaceService,
@@ -41,6 +43,7 @@ from apps.guest_workspace.services import (
     DashboardService,
     ReportService,
     CalculatorService,
+    CapitalService,
 )
 
 logger = logging.getLogger(__name__)
@@ -721,3 +724,145 @@ class WorkspaceDataBackupView(APIView):
         response = HttpResponse(json.dumps(backup_payload, indent=2), content_type="application/json")
         response["Content-Disposition"] = f'attachment; filename="finroute_backup_{workspace.id}_{timezone.now().strftime("%Y%m%d_%H%M%S")}.json"'
         return response
+
+
+# ─── Capital Entries & Daily Cash Reconciliation ──────────────────────────────
+
+class CapitalEntryView(APIView):
+    """
+    GET  /api/v1/app/capital/ — List starting route cash / capital entries.
+    POST /api/v1/app/capital/ — Record a starting cash / capital entry.
+    """
+    permission_classes = [IsAuthenticated, IsGuestUser]
+
+    @extend_schema(responses={200: CapitalEntrySerializer(many=True)})
+    def get(self, request):
+        workspace = GuestWorkspaceService.get_workspace(request.user)
+        entry_date_str = request.query_params.get("entry_date")
+        entry_date = None
+        if entry_date_str:
+            from datetime import datetime
+            try:
+                entry_date = datetime.strptime(entry_date_str, "%Y-%m-%d").date()
+            except ValueError:
+                pass
+
+        entries = CapitalService.get_capital_entries(workspace, entry_date=entry_date)
+        serializer = CapitalEntrySerializer(entries, many=True)
+        return success_response(data=serializer.data)
+
+    @extend_schema(request=CapitalEntryCreateSerializer, responses={201: CapitalEntrySerializer})
+    def post(self, request):
+        workspace = GuestWorkspaceService.get_workspace(request.user)
+        serializer = CapitalEntryCreateSerializer(data=request.data)
+        if not serializer.is_valid():
+            return error_response(errors=serializer.errors)
+
+        entry = CapitalService.record_capital(
+            workspace=workspace,
+            entry_date=serializer.validated_data["entry_date"],
+            amount=serializer.validated_data["amount"],
+            remarks=serializer.validated_data.get("remarks", ""),
+            added_by=request.user,
+        )
+        return created_response(
+            data=CapitalEntrySerializer(entry).data,
+            message="Starting cash / capital entry recorded successfully.",
+        )
+
+
+class CapitalEntryDetailView(APIView):
+    """
+    DELETE /api/v1/app/capital/{public_id}/ — Delete a capital entry.
+    """
+    permission_classes = [IsAuthenticated, IsGuestUser]
+
+    def delete(self, request, public_id):
+        workspace = GuestWorkspaceService.get_workspace(request.user)
+        CapitalService.delete_capital(workspace, str(public_id))
+        return success_response(message="Capital entry deleted successfully.")
+
+
+class DailyCashReconciliationView(APIView):
+    """
+    GET /api/v1/app/cash-reconciliation/?date=YYYY-MM-DD
+    Returns comprehensive daily route cash reconciliation:
+    (Collections + Capital Injected) - (New Disbursements + Expenses)
+    """
+    permission_classes = [IsAuthenticated, IsGuestUser]
+
+    def get(self, request):
+        from datetime import date as dt_date, datetime
+        from django.db.models import Sum, Count
+        from apps.guest_workspace.models import CustomerProfile, CollectionEntry, Expense, CapitalEntry
+
+        workspace = GuestWorkspaceService.get_workspace(request.user)
+        date_str = request.query_params.get("date")
+        target_date = dt_date.today()
+        if date_str:
+            try:
+                target_date = datetime.strptime(date_str, "%Y-%m-%d").date()
+            except ValueError:
+                pass
+
+        # 1. Collections Inflow
+        collections_agg = CollectionEntry.objects.filter(
+            workspace=workspace,
+            collection_date=target_date,
+        ).aggregate(
+            total=Sum("collected_amount"),
+            count=Count("id"),
+        )
+
+        # 2. Capital Injections Inflow
+        capital_agg = CapitalEntry.objects.filter(
+            workspace=workspace,
+            entry_date=target_date,
+        ).aggregate(
+            total=Sum("amount"),
+            count=Count("id"),
+        )
+
+        # 3. Disbursements Outflow
+        disbursements_agg = CustomerProfile.objects.filter(
+            workspace=workspace,
+            start_date=target_date,
+        ).aggregate(
+            total=Sum("disbursed_amount"),
+            count=Count("id"),
+        )
+
+        # 4. Expenses Outflow
+        expenses_agg = Expense.objects.filter(
+            workspace=workspace,
+            expense_date=target_date,
+        ).aggregate(
+            total=Sum("amount"),
+            count=Count("id"),
+        )
+
+        collections_total = float(collections_agg["total"] or 0)
+        capital_total = float(capital_agg["total"] or 0)
+        disbursements_total = float(disbursements_agg["total"] or 0)
+        expenses_total = float(expenses_agg["total"] or 0)
+
+        total_inflow = collections_total + capital_total
+        total_outflow = disbursements_total + expenses_total
+        net_cash_handheld = total_inflow - total_outflow
+
+        return success_response(data={
+            "date": target_date.isoformat(),
+            "collections_total": collections_total,
+            "collections_count": collections_agg["count"] or 0,
+            "capital_total": capital_total,
+            "capital_count": capital_agg["count"] or 0,
+            "disbursements_total": disbursements_total,
+            "disbursements_count": disbursements_agg["count"] or 0,
+            "expenses_total": expenses_total,
+            "expenses_count": expenses_agg["count"] or 0,
+            "total_inflow": total_inflow,
+            "total_outflow": total_outflow,
+            "net_cash_handheld": net_cash_handheld,
+            "is_cash_deficit": net_cash_handheld < 0,
+        })
+
