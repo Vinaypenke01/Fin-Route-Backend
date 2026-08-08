@@ -203,7 +203,7 @@ class CollectionService:
         """
         queryset = CollectionEntry.objects.filter(
             workspace=workspace
-        ).select_related("customer", "status", "payment_mode", "collected_by")
+        ).select_related("customer", "customer__line", "status", "payment_mode", "collected_by")
 
         if filters:
             if date_from := filters.get("date_from"):
@@ -216,6 +216,13 @@ class CollectionService:
                 queryset = queryset.filter(status__code=status)
             if payment_mode := filters.get("payment_mode"):
                 queryset = queryset.filter(payment_mode__code=payment_mode)
+            if line := filters.get("line"):
+                if str(line).isdigit():
+                    queryset = queryset.filter(customer__line_id=int(line))
+                else:
+                    queryset = queryset.filter(customer__line__public_id=str(line))
+            if portion := filters.get("portion"):
+                queryset = queryset.filter(customer__portion=str(portion).lower())
 
         return queryset
 

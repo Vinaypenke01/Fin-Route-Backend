@@ -17,6 +17,8 @@ from apps.guest_workspace.models import (
     CollectionEntry,
     Expense,
     CapitalEntry,
+    CollectionLine,
+    LineDaySchedule,
     CustomerStatus,
 )
 
@@ -97,12 +99,46 @@ class GuestWorkspaceUpdateSerializer(serializers.ModelSerializer):
         ]
 
 
+# ─── Collection Line Serializers ─────────────────────────────────────────────
+
+class LineDayScheduleSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = LineDaySchedule
+        fields = ["day_of_week", "portion"]
+
+
+class CollectionLineSerializer(serializers.ModelSerializer):
+    public_id = serializers.UUIDField(read_only=True)
+    day_schedules = LineDayScheduleSerializer(many=True, read_only=True)
+    customers_count = serializers.SerializerMethodField()
+
+    class Meta:
+        model = CollectionLine
+        fields = ["public_id", "name", "area", "is_active", "customers_count", "day_schedules", "created_at"]
+
+    def get_customers_count(self, obj):
+        return obj.customers.count()
+
+
+class LineScheduleInputSerializer(serializers.Serializer):
+    day_of_week = serializers.CharField(max_length=20)
+    portion = serializers.CharField(max_length=20, default="both")
+
+
+class LineCreateSerializer(serializers.Serializer):
+    name = serializers.CharField(max_length=150)
+    area = serializers.CharField(max_length=200, required=False, allow_blank=True)
+    schedules = LineScheduleInputSerializer(many=True, required=False)
+
+
 # ─── Customer Serializers ─────────────────────────────────────────────────────
 
 class CustomerProfileListSerializer(serializers.ModelSerializer):
     public_id = serializers.UUIDField(read_only=True)
     collection_frequency_name = serializers.CharField(source="collection_frequency.name", read_only=True)
     interest_type_name = serializers.CharField(source="interest_type.name", read_only=True)
+    line_public_id = serializers.UUIDField(source="line.public_id", read_only=True, allow_null=True)
+    line_name = serializers.CharField(source="line.name", read_only=True, allow_null=True)
     skipped_installments_count = serializers.SerializerMethodField()
 
     class Meta:
@@ -121,6 +157,10 @@ class CustomerProfileListSerializer(serializers.ModelSerializer):
             "collection_frequency",
             "collection_frequency_name",
             "collection_day",
+            "line",
+            "line_public_id",
+            "line_name",
+            "portion",
             "interest_type",
             "interest_type_name",
             "is_existing_borrower",
@@ -189,8 +229,8 @@ class CustomerProfileDetailSerializer(serializers.ModelSerializer):
 
 class CustomerCreateUpdateSerializer(serializers.Serializer):
     sequence_number = serializers.IntegerField(required=False, allow_null=True)
-    full_name = serializers.CharField(max_length=200)
-    mobile_number = serializers.CharField(max_length=15)
+    full_name = serializers.CharField(max_length=200, required=False)
+    mobile_number = serializers.CharField(max_length=15, required=False)
     alternate_mobile = serializers.CharField(max_length=15, required=False, allow_blank=True)
     address = serializers.CharField(required=False, allow_blank=True)
     city = serializers.CharField(max_length=100, required=False, allow_blank=True)
@@ -199,13 +239,15 @@ class CustomerCreateUpdateSerializer(serializers.Serializer):
     id_proof_type = serializers.CharField(max_length=50, required=False, allow_blank=True)
     id_proof_number = serializers.CharField(max_length=50, required=False, allow_blank=True)
     
-    collection_frequency = serializers.IntegerField(help_text="CollectionFrequency PK ID")
-    collection_day = serializers.CharField(max_length=20, required=False, default="monday")
-    interest_type = serializers.IntegerField(help_text="InterestType PK ID")
-    interest_rate = serializers.DecimalField(max_digits=8, decimal_places=4)
-    loan_amount = serializers.DecimalField(max_digits=12, decimal_places=2)
-    disbursed_amount = serializers.DecimalField(max_digits=12, decimal_places=2)
-    start_date = serializers.DateField()
+    collection_frequency = serializers.IntegerField(required=False, help_text="CollectionFrequency PK ID")
+    collection_day = serializers.CharField(max_length=20, required=False)
+    line = serializers.CharField(max_length=50, required=False, allow_null=True, allow_blank=True, help_text="CollectionLine public_id or ID")
+    portion = serializers.CharField(max_length=20, required=False)
+    interest_type = serializers.IntegerField(required=False, help_text="InterestType PK ID")
+    interest_rate = serializers.DecimalField(max_digits=8, decimal_places=4, required=False)
+    loan_amount = serializers.DecimalField(max_digits=12, decimal_places=2, required=False)
+    disbursed_amount = serializers.DecimalField(max_digits=12, decimal_places=2, required=False)
+    start_date = serializers.DateField(required=False)
     end_date = serializers.DateField(required=False, allow_null=True)
     notes = serializers.CharField(required=False, allow_blank=True)
     
@@ -217,11 +259,15 @@ class CustomerCreateUpdateSerializer(serializers.Serializer):
     installment_amount = serializers.DecimalField(max_digits=12, decimal_places=2, required=False, default=0)
 
     def validate_mobile_number(self, value):
-        return validate_mobile_number(value)
+        if value:
+            return validate_mobile_number(value)
+        return value
 
     def validate(self, attrs):
-        validate_positive_amount(attrs["loan_amount"])
-        validate_positive_amount(attrs["disbursed_amount"])
+        if "loan_amount" in attrs and attrs["loan_amount"] is not None:
+            validate_positive_amount(attrs["loan_amount"])
+        if "disbursed_amount" in attrs and attrs["disbursed_amount"] is not None:
+            validate_positive_amount(attrs["disbursed_amount"])
         return attrs
 
 
@@ -239,6 +285,9 @@ class CollectionListSerializer(serializers.ModelSerializer):
     remaining_installments_count = serializers.IntegerField(source="customer.remaining_installments_count", read_only=True)
     outstanding_balance = serializers.DecimalField(source="customer.outstanding_balance", max_digits=12, decimal_places=2, read_only=True)
     skipped_installments_count = serializers.SerializerMethodField()
+    line_public_id = serializers.UUIDField(source="customer.line.public_id", read_only=True, allow_null=True)
+    line_name = serializers.CharField(source="customer.line.name", read_only=True, allow_null=True)
+    portion = serializers.CharField(source="customer.portion", read_only=True, allow_null=True)
     status_code = serializers.CharField(source="status.code", read_only=True)
     status_name = serializers.CharField(source="status.name", read_only=True)
     payment_mode_name = serializers.CharField(source="payment_mode.name", read_only=True)
@@ -258,6 +307,9 @@ class CollectionListSerializer(serializers.ModelSerializer):
             "customer_code",
             "customer_name",
             "customer_public_id",
+            "line_public_id",
+            "line_name",
+            "portion",
             "disbursed_date",
             "customer_start_date",
             "total_installments",

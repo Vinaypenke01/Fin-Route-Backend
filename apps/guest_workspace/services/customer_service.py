@@ -98,14 +98,21 @@ class CustomerService:
             remaining_installments_count=remaining_installments_count,
             amount_already_collected=amount_already_collected,
             installment_amount=installment_amount,
-            notes=validated_data.get("notes") or (f"Imported ongoing loan: {installments_paid_count} paid, {remaining_installments_count} remaining, ₹{amount_already_collected} collected" if is_existing_borrower else ""),
-            **{k: v for k, v in validated_data.items()
-               if k not in ("total_due", "outstanding_balance", "is_existing_borrower", "total_installments", "installments_paid_count", "remaining_installments_count", "amount_already_collected", "installment_amount", "notes", "collection_frequency", "interest_type")},
+            line=line_obj,
+            portion=portion_val,
+            **validated_data,
         )
 
-        from apps.audit_logs.services import AuditLogService
+        from apps.audit_logs.services import AuditLogService as AuditService
         from apps.audit_logs.models import ActionType
-        AuditLogService.log_action(
+        logger.info(
+            "Audit record creation: action=%s target=%s user=%s",
+            ActionType.CREATE,
+            "CustomerProfile",
+            created_by,
+        )
+
+        AuditService.log_action(
             user=created_by or workspace.owner,
             action=ActionType.CREATE,
             target_model="CustomerProfile",
@@ -143,7 +150,7 @@ class CustomerService:
                     remarks=f"Initial opening balance record for existing borrower ({installments_paid_count} past installments paid)",
                 )
             except Exception as e:
-                logger.error("Failed to create initial collection entry for existing borrower: %s", e)
+                logger.error("Failed to create opening collection record for customer %s: %s", customer_code, str(e))
 
         return customer
 
@@ -156,10 +163,12 @@ class CustomerService:
         - status (active/closed/defaulted/suspended)
         - search (full_name, mobile_number, customer_code)
         - collection_frequency
+        - line (public_id or ID)
+        - portion (morning/afternoon/both)
         - ordering
         """
         queryset = CustomerProfile.objects.filter(workspace=workspace).select_related(
-            "collection_frequency", "interest_type"
+            "collection_frequency", "interest_type", "line"
         )
 
         if filters:
@@ -186,10 +195,18 @@ class CustomerService:
             if collection_day and str(collection_day).lower() not in ("all", "undefined", "null", ""):
                 queryset = queryset.filter(collection_day=str(collection_day).lower())
 
-        results = list(queryset.order_by("sequence_number", "customer_code"))
-        for cust in results:
-            CustomerService.recalculate_outstanding(cust)
-        return results
+            line_val = filters.get("line")
+            if line_val and str(line_val).lower() not in ("all", "undefined", "null", ""):
+                if str(line_val).isdigit():
+                    queryset = queryset.filter(line_id=int(line_val))
+                else:
+                    queryset = queryset.filter(line__public_id=str(line_val))
+
+            portion_val = filters.get("portion")
+            if portion_val and str(portion_val).lower() not in ("all", "undefined", "null", ""):
+                queryset = queryset.filter(portion=str(portion_val).lower())
+
+        return queryset.order_by("sequence_number", "customer_code")
 
     @staticmethod
     def get_customer_detail(workspace: GuestWorkspace, customer_public_id: str) -> CustomerProfile:
@@ -242,6 +259,19 @@ class CustomerService:
                 interest_rate=float(interest_rate),
                 interest_type=customer.interest_type_id,
             )
+
+        raw_line = validated_data.pop("line", None)
+        if raw_line is not None:
+            if not raw_line or str(raw_line).lower() in ("null", "none", ""):
+                customer.line = None
+            else:
+                from apps.guest_workspace.models import CollectionLine
+                if str(raw_line).isdigit():
+                    line_obj = CollectionLine.objects.filter(workspace=workspace, id=int(raw_line)).first()
+                else:
+                    line_obj = CollectionLine.objects.filter(workspace=workspace, public_id=str(raw_line)).first()
+                if line_obj:
+                    customer.line = line_obj
 
         for field, value in validated_data.items():
             setattr(customer, field, value)

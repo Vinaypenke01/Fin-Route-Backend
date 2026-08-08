@@ -39,6 +39,12 @@ class CustomerStatus(models.TextChoices):
     SUSPENDED = "suspended", "Suspended"
 
 
+class DayPortionChoices(models.TextChoices):
+    MORNING = "morning", "Morning (1:00 AM – 1:00 PM)"
+    AFTERNOON = "afternoon", "Afternoon / Evening (1:00 PM – 12:00 AM)"
+    BOTH = "both", "Full Day (Both Portions)"
+
+
 # ─── GuestWorkspace ───────────────────────────────────────────────────────────
 
 class GuestWorkspace(BasePublicModel):
@@ -144,6 +150,90 @@ class GuestWorkspace(BasePublicModel):
         base_days = 1  # Free tier base: 1 day per week
         total_days = base_days + self.purchased_additional_days
         return min(total_days, 7)
+
+
+# ─── Collection Line (Route) & Schedule ───────────────────────────────────────
+
+class CollectionLine(BasePublicModel):
+    """
+    Represents a geographic or route collection unit (Line / Business Route).
+    E.g. 'Line 1 - Market Area', 'Kukatpally Route'.
+    """
+
+    workspace = models.ForeignKey(
+        GuestWorkspace,
+        on_delete=models.CASCADE,
+        related_name="lines",
+        db_index=True,
+    )
+    name = models.CharField(
+        max_length=150,
+        help_text="Name of the line/route e.g. Line 1 - Market Area.",
+    )
+    area = models.CharField(
+        max_length=200,
+        blank=True,
+        help_text="Area or locality details e.g. Market Road, Sector 4.",
+    )
+    is_active = models.BooleanField(default=True, db_index=True)
+    created_by = models.ForeignKey(
+        "accounts.User",
+        on_delete=models.PROTECT,
+        related_name="created_lines",
+    )
+
+    class Meta:
+        verbose_name = "Collection Line"
+        verbose_name_plural = "Collection Lines"
+        ordering = ["created_at"]
+        indexes = [
+            models.Index(fields=["workspace", "is_active"]),
+        ]
+
+    def __str__(self):
+        return f"{self.name} ({self.workspace.name})"
+
+
+class LineDaySchedule(BasePublicModel):
+    """
+    Assigns a weekday and time portion (Morning 1am-1pm / Afternoon 1pm-12am / Both) to a Line.
+    Capacity rule: A (day_of_week, portion) pair cannot conflict across lines in the same workspace.
+    """
+
+    line = models.ForeignKey(
+        CollectionLine,
+        on_delete=models.CASCADE,
+        related_name="day_schedules",
+        db_index=True,
+    )
+    day_of_week = models.CharField(
+        max_length=20,
+        choices=[
+            ("monday", "Monday"),
+            ("tuesday", "Tuesday"),
+            ("wednesday", "Wednesday"),
+            ("thursday", "Thursday"),
+            ("friday", "Friday"),
+            ("saturday", "Saturday"),
+            ("sunday", "Sunday"),
+        ],
+        db_index=True,
+    )
+    portion = models.CharField(
+        max_length=20,
+        choices=DayPortionChoices.choices,
+        default=DayPortionChoices.BOTH,
+        db_index=True,
+    )
+
+    class Meta:
+        verbose_name = "Line Day Schedule"
+        verbose_name_plural = "Line Day Schedules"
+        ordering = ["day_of_week", "portion"]
+        unique_together = ["line", "day_of_week"]
+
+    def __str__(self):
+        return f"{self.line.name} — {self.day_of_week} ({self.portion})"
 
 
 # ─── Customer Profile ─────────────────────────────────────────────────────────
@@ -279,6 +369,22 @@ class CustomerProfile(BasePublicModel):
         db_index=True,
         help_text="Assigned day of the week for weekly/scheduled collections.",
     )
+    line = models.ForeignKey(
+        CollectionLine,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="customers",
+        db_index=True,
+        help_text="The collection route/line this customer belongs to.",
+    )
+    portion = models.CharField(
+        max_length=20,
+        choices=DayPortionChoices.choices,
+        default=DayPortionChoices.BOTH,
+        db_index=True,
+        help_text="Assigned day portion (Morning 1am-1pm / Afternoon 1pm-12am / Both).",
+    )
 
     # --- Status ---
     status = models.CharField(
@@ -303,6 +409,7 @@ class CustomerProfile(BasePublicModel):
         indexes = [
             models.Index(fields=["workspace", "status"]),
             models.Index(fields=["workspace", "customer_code"]),
+            models.Index(fields=["workspace", "start_date"]),
             models.Index(fields=["mobile_number"]),
         ]
 

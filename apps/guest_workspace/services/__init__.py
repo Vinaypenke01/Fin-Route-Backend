@@ -7,6 +7,7 @@ from .dashboard_service import DashboardService
 from .report_service import ReportService
 from .calculator_service import CalculatorService
 from .capital_service import CapitalService
+from .line_service import LineService
 
 __all__ = [
     "GuestWorkspaceService",
@@ -17,4 +18,5 @@ __all__ = [
     "ReportService",
     "CalculatorService",
     "CapitalService",
+    "LineService",
 ]

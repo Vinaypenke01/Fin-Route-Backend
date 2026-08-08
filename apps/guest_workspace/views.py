@@ -34,6 +34,7 @@ from apps.guest_workspace.serializers import (
     CalculatorRequestSerializer,
     CapitalEntrySerializer,
     CapitalEntryCreateSerializer,
+    CollectionLineSerializer,
 )
 from apps.guest_workspace.services import (
     GuestWorkspaceService,
@@ -131,6 +132,8 @@ class CustomerListCreateView(APIView):
             "search": request.query_params.get("search"),
             "collection_frequency": request.query_params.get("frequency"),
             "collection_day": request.query_params.get("collection_day"),
+            "line": request.query_params.get("line"),
+            "portion": request.query_params.get("portion"),
         }
         queryset = CustomerService.get_customer_list(workspace, filters)
 
@@ -229,6 +232,8 @@ class CollectionListCreateView(APIView):
             "customer": request.query_params.get("customer"),
             "status": request.query_params.get("status"),
             "payment_mode": request.query_params.get("payment_mode"),
+            "line": request.query_params.get("line"),
+            "portion": request.query_params.get("portion"),
         }
         queryset = CollectionService.get_collections(workspace, filters)
 
@@ -865,4 +870,96 @@ class DailyCashReconciliationView(APIView):
             "net_cash_handheld": net_cash_handheld,
             "is_cash_deficit": net_cash_handheld < 0,
         })
+
+
+# ─── Collection Line Views ───────────────────────────────────────────────────
+
+class LineListCreateView(APIView):
+    """
+    GET /api/v1/app/lines/ — List active collection lines
+    POST /api/v1/app/lines/ — Create a new collection line with weekday portions
+    """
+    permission_classes = [IsAuthenticated, IsGuestUser]
+    serializer_class = CollectionLineSerializer
+
+    def get(self, request):
+        workspace = GuestWorkspaceService.get_workspace(request.user)
+        from apps.guest_workspace.services.line_service import LineService
+        lines = LineService.get_lines(workspace)
+        serializer = CollectionLineSerializer(lines, many=True)
+        return success_response(data=serializer.data)
+
+    def post(self, request):
+        workspace = GuestWorkspaceService.get_workspace(request.user)
+        from apps.guest_workspace.serializers import LineCreateSerializer
+        serializer = LineCreateSerializer(data=request.data)
+        if not serializer.is_valid():
+            return error_response(errors=serializer.errors)
+
+        from apps.guest_workspace.services.line_service import LineService
+        line = LineService.create_line(
+            workspace=workspace,
+            name=serializer.validated_data["name"],
+            area=serializer.validated_data.get("area", ""),
+            schedules=serializer.validated_data.get("schedules", []),
+            created_by=request.user,
+        )
+        return created_response(
+            data=CollectionLineSerializer(line).data,
+            message="Collection line created successfully.",
+        )
+
+
+class LineDetailView(APIView):
+    """
+    GET /api/v1/app/lines/<uuid:line_public_id>/
+    PATCH /api/v1/app/lines/<uuid:line_public_id>/
+    DELETE /api/v1/app/lines/<uuid:line_public_id>/
+    """
+    permission_classes = [IsAuthenticated, IsGuestUser]
+
+    def get(self, request, line_public_id):
+        workspace = GuestWorkspaceService.get_workspace(request.user)
+        from apps.guest_workspace.services.line_service import LineService
+        line = LineService.get_line_detail(workspace, str(line_public_id))
+        return success_response(data=CollectionLineSerializer(line).data)
+
+    def patch(self, request, line_public_id):
+        workspace = GuestWorkspaceService.get_workspace(request.user)
+        from apps.guest_workspace.services.line_service import LineService
+        line = LineService.update_line(
+            workspace=workspace,
+            line_public_id=str(line_public_id),
+            name=request.data.get("name"),
+            area=request.data.get("area"),
+            schedules=request.data.get("schedules"),
+        )
+        return success_response(
+            data=CollectionLineSerializer(line).data,
+            message="Collection line updated successfully.",
+        )
+
+    def delete(self, request, line_public_id):
+        workspace = GuestWorkspaceService.get_workspace(request.user)
+        from apps.guest_workspace.services.line_service import LineService
+        LineService.delete_line(workspace, str(line_public_id))
+        return success_response(message="Collection line deleted successfully.")
+
+
+class AvailablePortionsView(APIView):
+    """
+    GET /api/v1/app/lines/available-portions/
+    Returns available day portions (morning, afternoon, both) per day of week.
+    """
+    permission_classes = [IsAuthenticated, IsGuestUser]
+
+    def get(self, request):
+        workspace = GuestWorkspaceService.get_workspace(request.user)
+        exclude_id = request.query_params.get("exclude_line_id")
+        from apps.guest_workspace.services.line_service import LineService
+        portions = LineService.get_available_day_portions(
+            workspace=workspace,
+            exclude_line_id=int(exclude_id) if exclude_id and str(exclude_id).isdigit() else None,
+        )
+        return success_response(data=portions)
 

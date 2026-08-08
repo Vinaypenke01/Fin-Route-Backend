@@ -27,9 +27,16 @@ from apps.guest_workspace.views import (
     CapitalEntryView,
     CapitalEntryDetailView,
     DailyCashReconciliationView,
+    LineListCreateView,
+    LineDetailView,
+    AvailablePortionsView,
 )
 
 urlpatterns = [
+    # Lines (Routes)
+    path("lines/", LineListCreateView.as_view(), name="app-line-list-create"),
+    path("lines/available-portions/", AvailablePortionsView.as_view(), name="app-line-available-portions"),
+    path("lines/<uuid:line_public_id>/", LineDetailView.as_view(), name="app-line-detail"),
     # Workspace Settings
     path("workspace/", WorkspaceDetailView.as_view(), name="app-workspace"),
 
