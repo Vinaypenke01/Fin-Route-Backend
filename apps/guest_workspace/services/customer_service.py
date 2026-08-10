@@ -137,18 +137,50 @@ class CustomerService:
                 status_obj = CollectionStatus.objects.filter(code="paid").first()
                 mode_obj = PaymentMode.objects.first()
 
-                CollectionEntry.objects.create(
-                    workspace=workspace,
-                    customer=customer,
-                    collected_by=created_by,
-                    receipt_number=generate_receipt_number(workspace.id, coll_date),
-                    collection_date=coll_date,
-                    expected_amount=amount_already_collected,
-                    collected_amount=amount_already_collected,
-                    status_id=status_obj.id if status_obj else 1,
-                    payment_mode_id=mode_obj.id if mode_obj else 1,
-                    remarks=f"Initial opening balance record for existing borrower ({installments_paid_count} past installments paid)",
-                )
+                inst_amt = float(installment_amount) if installment_amount and float(installment_amount) > 0 else (float(total_due) / total_installments if total_installments > 0 else 0.0)
+                paid_count = int(installments_paid_count or 0)
+
+                if paid_count > 0 and inst_amt > 0:
+                    for i in range(paid_count):
+                        CollectionEntry.objects.create(
+                            workspace=workspace,
+                            customer=customer,
+                            collected_by=created_by,
+                            receipt_number=generate_receipt_number(workspace.id, coll_date),
+                            collection_date=coll_date,
+                            expected_amount=inst_amt,
+                            collected_amount=inst_amt,
+                            status_id=status_obj.id if status_obj else 1,
+                            payment_mode_id=mode_obj.id if mode_obj else 1,
+                            remarks=f"Opening balance installment #{i+1} paid for existing borrower",
+                        )
+                    rem_collected = float(amount_already_collected) - (paid_count * inst_amt)
+                    if rem_collected > 0.01:
+                        CollectionEntry.objects.create(
+                            workspace=workspace,
+                            customer=customer,
+                            collected_by=created_by,
+                            receipt_number=generate_receipt_number(workspace.id, coll_date),
+                            collection_date=coll_date,
+                            expected_amount=rem_collected,
+                            collected_amount=rem_collected,
+                            status_id=status_obj.id if status_obj else 1,
+                            payment_mode_id=mode_obj.id if mode_obj else 1,
+                            remarks="Opening balance remaining partial payment for existing borrower",
+                        )
+                else:
+                    CollectionEntry.objects.create(
+                        workspace=workspace,
+                        customer=customer,
+                        collected_by=created_by,
+                        receipt_number=generate_receipt_number(workspace.id, coll_date),
+                        collection_date=coll_date,
+                        expected_amount=amount_already_collected,
+                        collected_amount=amount_already_collected,
+                        status_id=status_obj.id if status_obj else 1,
+                        payment_mode_id=mode_obj.id if mode_obj else 1,
+                        remarks=f"Initial opening balance record for existing borrower ({paid_count} past installments paid)",
+                    )
             except Exception as e:
                 logger.error("Failed to create opening collection record for customer %s: %s", customer_code, str(e))
 
