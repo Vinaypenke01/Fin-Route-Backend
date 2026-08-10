@@ -101,37 +101,169 @@ class OTPService:
             except Exception:
                 pass
 
-        message = (
-            f"Your FinRoute Email Verification Code to {purpose_label} is: {otp_plain}\n\n"
-            f"This OTP is valid for {getattr(settings, 'OTP_TTL_MINUTES', 5)} minutes.\n"
+        ttl_minutes = getattr(settings, 'OTP_TTL_MINUTES', 5)
+        text_message = (
+            f"Your FinRoute Verification Code to {purpose_label} is: {otp_plain}\n\n"
+            f"This OTP is valid for {ttl_minutes} minutes.\n"
             f"Do not share this code with anyone.\n"
         )
+
+        html_message = f"""<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>FinRoute Verification Code</title>
+</head>
+<body style="margin: 0; padding: 0; background-color: #f4f6f8; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
+  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background-color: #f4f6f8; padding: 30px 15px;">
+    <tr>
+      <td align="center">
+        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="max-width: 520px; background-color: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 10px 25px rgba(0,0,0,0.05); border: 1px solid #e5e7eb;">
+          
+          <!-- Header Banner -->
+          <tr>
+            <td style="background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%); padding: 28px 32px; text-align: center;">
+              <div style="font-size: 24px; font-weight: 800; color: #38bdf8; letter-spacing: 0.5px;">
+                ⚡ FinRoute
+              </div>
+              <div style="font-size: 11px; color: #94a3b8; margin-top: 4px; font-weight: 500; text-transform: uppercase; letter-spacing: 1px;">
+                Micro-Lending Engine
+              </div>
+            </td>
+          </tr>
+
+          <!-- Main Content Body -->
+          <tr>
+            <td style="padding: 32px 32px 24px 32px; text-align: center;">
+              <div style="display: inline-block; background-color: #f0f9ff; border-radius: 50%; width: 52px; height: 52px; line-height: 52px; margin-bottom: 16px;">
+                <span style="font-size: 24px;">🔒</span>
+              </div>
+              
+              <h1 style="margin: 0 0 8px 0; font-size: 20px; font-weight: 700; color: #0f172a;">
+                Verification Code
+              </h1>
+              
+              <p style="margin: 0 0 24px 0; font-size: 14px; color: #475569; line-height: 1.5;">
+                Please use the following 6-digit One-Time Password (OTP) to {purpose_label}:
+              </p>
+
+              <!-- OTP Code Display Card -->
+              <div style="background: #f8fafc; border: 2px dashed #0284c7; border-radius: 12px; padding: 20px 16px; margin-bottom: 24px;">
+                <div style="font-family: 'Courier New', Courier, monospace; font-size: 36px; font-weight: 800; color: #0369a1; letter-spacing: 10px; padding-left: 10px;">
+                  {otp_plain}
+                </div>
+                <div style="font-size: 12px; font-weight: 600; color: #0284c7; margin-top: 10px;">
+                  ⏱️ Expires in {ttl_minutes} minutes
+                </div>
+              </div>
+
+              <!-- Security Notice Callout -->
+              <div style="background-color: #fffbeb; border: 1px solid #fef3c7; border-radius: 10px; padding: 14px 16px; text-align: left; margin-bottom: 20px;">
+                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+                  <tr>
+                    <td width="24" valign="top" style="font-size: 16px; padding-right: 8px;">🛡️</td>
+                    <td style="font-size: 12px; color: #92400e; line-height: 1.4;">
+                      <strong>Security Notice:</strong> Do not share this OTP with anyone. FinRoute staff will never call or message asking for your code.
+                    </td>
+                  </tr>
+                </table>
+              </div>
+
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td style="background-color: #f8fafc; padding: 20px 32px; border-top: 1px solid #f1f5f9; text-align: center;">
+              <p style="margin: 0; font-size: 12px; color: #94a3b8; line-height: 1.5;">
+                This is an automated security verification email from <strong>FinRoute Micro-Lender Platform</strong>.<br>
+                If you did not request this code, you can safely ignore this message.
+              </p>
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>"""
 
         recipient_list = [target_email] if target_email else []
 
         if recipient_list:
-            logger.info("📧 Attempting to send OTP email to %s via SMTP (%s)...", target_email, getattr(settings, 'EMAIL_HOST', 'SMTP'))
-            try:
-                send_mail(
-                    subject=f"FinRoute — Your Email Verification Code: {otp_plain}",
-                    message=message,
-                    from_email=getattr(settings, 'DEFAULT_FROM_EMAIL', 'info@digitalcore.co.in'),
-                    recipient_list=recipient_list,
-                    fail_silently=False,
-                )
-                logger.info("✅ SUCCESS: OTP email sent successfully to %s | OTP: %s", target_email, otp_plain)
-                print(f"\n==========================================")
-                print(f"✅ OTP EMAIL SENT SUCCESSFULLY TO {target_email}!")
-                print(f"📩 Target Email: {target_email}")
-                print(f"🔑 OTP Code:     {otp_plain}")
-                print(f"==========================================\n", flush=True)
-            except Exception as exc:
-                logger.error("❌ FAILURE: Failed to send OTP email to %s: %s", target_email, exc, exc_info=True)
-                print(f"\n==========================================")
-                print(f"❌ OTP EMAIL DELIVERY FAILED FOR {target_email}!")
-                print(f"⚠️ SMTP Error:   {exc}")
-                print(f"🔑 OTP Code:     {otp_plain} (Console Fallback)")
-                print(f"==========================================\n", flush=True)
+            resend_key = getattr(settings, 'RESEND_API_KEY', '')
+            email_sent = False
+            
+            if resend_key:
+                try:
+                    from_email = getattr(settings, 'DEFAULT_FROM_EMAIL', 'FinRoute <info@fin-route.site>')
+                    email_payload = {
+                        "from": from_email,
+                        "to": [target_email],
+                        "subject": f"FinRoute — Your Verification Code: {otp_plain}",
+                        "text": text_message,
+                        "html": html_message,
+                    }
+                    res_id = None
+                    try:
+                        import resend
+                        resend.api_key = resend_key
+                        response = resend.Emails.send(email_payload)
+                        res_id = response.get("id") if isinstance(response, dict) else getattr(response, "id", str(response))
+                    except (ImportError, Exception) as py_err:
+                        import requests
+                        headers = {
+                            "Authorization": f"Bearer {resend_key}",
+                            "Content-Type": "application/json",
+                        }
+                        req_resp = requests.post(
+                            "https://api.resend.com/emails",
+                            json=email_payload,
+                            headers=headers,
+                            timeout=10,
+                        )
+                        if req_resp.status_code in (200, 201):
+                            res_id = req_resp.json().get("id")
+                        else:
+                            raise Exception(f"Resend REST API HTTP {req_resp.status_code}: {req_resp.text}")
+
+                    logger.info("✅ SUCCESS: OTP email sent via Resend API to %s | ID: %s", target_email, res_id)
+                    print(f"\n==========================================")
+                    print(f"✅ RESEND OTP EMAIL DELIVERED TO {target_email}!")
+                    print(f"📩 Target Email: {target_email}")
+                    print(f"🔑 OTP Code:     {otp_plain}")
+                    print(f"🆔 Resend ID:    {res_id}")
+                    print(f"==========================================\n", flush=True)
+                    email_sent = True
+                except Exception as r_err:
+                    logger.warning("⚠️ Resend API email send error: %s. Falling back to SMTP...", r_err)
+
+            if not email_sent:
+                logger.info("📧 Attempting to send OTP email to %s via Django SMTP...", target_email)
+                try:
+                    send_mail(
+                        subject=f"FinRoute — Your Verification Code: {otp_plain}",
+                        message=text_message,
+                        html_message=html_message,
+                        from_email=getattr(settings, 'DEFAULT_FROM_EMAIL', 'FinRoute <info@fin-route.site>'),
+                        recipient_list=recipient_list,
+                        fail_silently=False,
+                    )
+                    logger.info("✅ SUCCESS: OTP email sent successfully to %s | OTP: %s", target_email, otp_plain)
+                    print(f"\n==========================================")
+                    print(f"✅ OTP EMAIL SENT SUCCESSFULLY TO {target_email}!")
+                    print(f"📩 Target Email: {target_email}")
+                    print(f"🔑 OTP Code:     {otp_plain}")
+                    print(f"==========================================\n", flush=True)
+                except Exception as exc:
+                    logger.error("❌ FAILURE: Failed to send OTP email to %s: %s", target_email, exc, exc_info=True)
+                    print(f"\n==========================================")
+                    print(f"❌ OTP EMAIL DELIVERY FAILED FOR {target_email}!")
+                    print(f"⚠️ SMTP Error:   {exc}")
+                    print(f"🔑 OTP Code:     {otp_plain} (Console Fallback)")
+                    print(f"==========================================\n", flush=True)
         else:
             logger.warning("⚠️ No recipient email found for mobile=%s. OTP printed to console: %s", mobile_number, otp_plain)
             print(f"\n==========================================")
