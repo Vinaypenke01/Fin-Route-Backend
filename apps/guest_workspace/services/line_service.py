@@ -33,9 +33,7 @@ class LineService:
     def get_lines(workspace: GuestWorkspace) -> QuerySet:
         """
         Fetch active collection lines with pre-fetched day schedules for a workspace.
-        Auto-migrates existing production workspace if no lines exist yet.
         """
-        LineService.ensure_default_line_for_workspace(workspace)
         return (
             CollectionLine.objects.filter(workspace=workspace, is_active=True)
             .prefetch_related("day_schedules")
