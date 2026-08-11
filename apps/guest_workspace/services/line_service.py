@@ -150,18 +150,11 @@ class LineService:
         max_allowed_days = workspace.max_allowed_collection_days
         max_allowed_sessions = max_allowed_days * 2
 
-        if len(unique_days) > max_allowed_days:
-            raise BusinessRuleException(
-                f"Your plan allows a maximum of {max_allowed_days} collection day(s) per week. "
-                f"Configuring schedules across {len(unique_days)} distinct days exceeds your plan limit. "
-                f"Please upgrade your plan to unlock more collection days."
-            )
-
         if total_sessions > max_allowed_sessions:
             raise BusinessRuleException(
-                f"Your plan allows up to {max_allowed_days} collection day(s) ({max_allowed_sessions} session(s) max per week). "
-                f"Your configured lines currently require {total_sessions} session(s). "
-                f"Please upgrade your plan to add additional sessions or lines."
+                f"Your {workspace.subscription_plan.capitalize()} plan allows up to {max_allowed_sessions} session(s) max per week "
+                f"({max_allowed_days} full day equivalent). Your configured route schedules require {total_sessions} session(s). "
+                f"Please upgrade your plan to unlock more collection sessions or routes."
             )
 
     @staticmethod
