@@ -102,6 +102,69 @@ class LineService:
         return result
 
     @staticmethod
+    def validate_workspace_plan_limits(
+        workspace: GuestWorkspace,
+        new_or_updated_schedules: List[Dict[str, str]],
+        exclude_line_id: int = None,
+    ) -> None:
+        """
+        Validates that total active collection sessions and unique days across ALL active lines
+        in the workspace do NOT exceed workspace.max_allowed_collection_days (Plan limit).
+        Rules:
+        - max_allowed_days = workspace.max_allowed_collection_days
+        - max_allowed_sessions = max_allowed_days * 2
+        - portion 'both' counts as 2 sessions (1.0 full day).
+        - portion 'morning' or 'afternoon' counts as 1 session (0.5 day).
+        """
+        existing_schedules_qs = LineDaySchedule.objects.filter(
+            line__workspace=workspace,
+            line__is_active=True,
+        )
+        if exclude_line_id:
+            existing_schedules_qs = existing_schedules_qs.exclude(line_id=exclude_line_id)
+
+        existing_schedules = list(existing_schedules_qs.values("day_of_week", "portion"))
+
+        combined_schedules = existing_schedules + [
+            {
+                "day_of_week": s.get("day_of_week", "").lower(),
+                "portion": s.get("portion", DayPortionChoices.BOTH).lower(),
+            }
+            for s in new_or_updated_schedules
+        ]
+
+        total_sessions = 0
+        unique_days = set()
+
+        for s in combined_schedules:
+            day = s.get("day_of_week")
+            portion = s.get("portion")
+            if not day:
+                continue
+            unique_days.add(day)
+            if portion == DayPortionChoices.BOTH:
+                total_sessions += 2
+            else:
+                total_sessions += 1
+
+        max_allowed_days = workspace.max_allowed_collection_days
+        max_allowed_sessions = max_allowed_days * 2
+
+        if len(unique_days) > max_allowed_days:
+            raise BusinessRuleException(
+                f"Your plan allows a maximum of {max_allowed_days} collection day(s) per week. "
+                f"Configuring schedules across {len(unique_days)} distinct days exceeds your plan limit. "
+                f"Please upgrade your plan to unlock more collection days."
+            )
+
+        if total_sessions > max_allowed_sessions:
+            raise BusinessRuleException(
+                f"Your plan allows up to {max_allowed_days} collection day(s) ({max_allowed_sessions} session(s) max per week). "
+                f"Your configured lines currently require {total_sessions} session(s). "
+                f"Please upgrade your plan to add additional sessions or lines."
+            )
+
+    @staticmethod
     @transaction.atomic
     def create_line(
         workspace: GuestWorkspace,
@@ -118,7 +181,10 @@ class LineService:
 
         schedules = schedules or []
 
-        # Validate capacity for each requested schedule
+        # Validate workspace subscription plan limits (sessions & days)
+        LineService.validate_workspace_plan_limits(workspace, schedules)
+
+        # Validate capacity for each requested schedule against existing lines
         for sched in schedules:
             day = sched.get("day_of_week", "").lower()
             portion = sched.get("portion", DayPortionChoices.BOTH).lower()
@@ -167,6 +233,9 @@ class LineService:
         line.save()
 
         if schedules is not None:
+            # Validate workspace subscription plan limits excluding current line
+            LineService.validate_workspace_plan_limits(workspace, schedules, exclude_line_id=line.id)
+
             # Validate capacity excluding current line
             for sched in schedules:
                 day = sched.get("day_of_week", "").lower()
