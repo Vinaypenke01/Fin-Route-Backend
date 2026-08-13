@@ -126,7 +126,7 @@ class RouteEmailReportService:
                 float(cust.installment_amount or 0),
                 cust.start_date.isoformat() if cust.start_date else "",
                 cust.start_date.isoformat() if cust.start_date else "",
-                float(cust.total_paid || 0),
+                float(cust.total_paid or 0),
                 cust.installments_paid_count or 0,
                 float(cust.outstanding_balance or 0),
             ]
