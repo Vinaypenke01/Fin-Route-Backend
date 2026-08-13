@@ -14,7 +14,7 @@ API Views for Guest Workspace:
 import logging
 from datetime import datetime, date as dt_date
 from rest_framework.views import APIView
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.response import Response
 from django.http import HttpResponse
 from drf_spectacular.utils import extend_schema
@@ -885,13 +885,22 @@ class DailyCashReconciliationView(APIView):
 class TriggerDailyRouteEmailsView(APIView):
     """
     POST /api/v1/app/reports/trigger-daily-emails/
-    Manually triggers the evening collection email dispatch with Excel attachments.
+    Triggers the evening collection email dispatch with Excel attachments for active route lines.
+    Secured via optional X-Cron-Secret header or logged-in user authentication.
     """
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AllowAny]
 
     def post(self, request):
-        workspace = GuestWorkspaceService.get_workspace(request.user)
-        date_str = request.data.get("date")
+        from django.conf import settings
+        import os
+        expected_secret = getattr(settings, 'CRON_SECRET_KEY', 'finroute_cron_secret_2026') or os.environ.get('CRON_SECRET_KEY', 'finroute_cron_secret_2026')
+        provided_secret = request.headers.get("X-Cron-Secret") or request.query_params.get("secret")
+
+        is_authenticated_user = request.user and request.user.is_authenticated
+        if not is_authenticated_user and provided_secret != expected_secret:
+            return error_response(message="Authentication required or invalid X-Cron-Secret key.", status_code=403)
+
+        date_str = request.data.get("date") if hasattr(request, "data") else None
         target_date = dt_date.today()
         if date_str:
             try:
@@ -901,32 +910,45 @@ class TriggerDailyRouteEmailsView(APIView):
 
         today_weekday = target_date.strftime("%A").lower()
         from apps.guest_workspace.services.route_email_report_service import RouteEmailReportService
+        from apps.guest_workspace.models import GuestWorkspace, CollectionLine
 
-        lines = CollectionLine.objects.filter(workspace=workspace, is_active=True).prefetch_related("day_schedules")
-        matching_lines = []
-        for line in lines:
-            if line.day_schedules.filter(day_of_week__iexact=today_weekday).exists():
-                matching_lines.append(line)
+        workspaces_qs = GuestWorkspace.objects.filter(is_active=True)
 
-        if not matching_lines:
-            matching_lines = list(lines) if lines.exists() else [None]
+        # If user is authenticated, limit to their workspace only
+        if request.user and request.user.is_authenticated:
+            try:
+                ws = GuestWorkspaceService.get_workspace(request.user)
+                workspaces_qs = GuestWorkspace.objects.filter(id=ws.id)
+            except Exception:
+                pass
 
         sent_results = []
-        for line in matching_lines:
-            sent = RouteEmailReportService.send_route_email(
-                workspace=workspace,
-                line=line,
-                target_date=target_date,
-            )
-            sent_results.append({
-                "line": line.name if line else "All Lines",
-                "sent": sent,
-            })
+        for ws in workspaces_qs:
+            lines = CollectionLine.objects.filter(workspace=ws, is_active=True).prefetch_related("day_schedules")
+            matching_lines = []
+            for line in lines:
+                if line.day_schedules.filter(day_of_week__iexact=today_weekday).exists():
+                    matching_lines.append(line)
+
+            if not matching_lines:
+                matching_lines = list(lines) if lines.exists() else [None]
+
+            for line in matching_lines:
+                sent = RouteEmailReportService.send_route_email(
+                    workspace=ws,
+                    line=line,
+                    target_date=target_date,
+                )
+                sent_results.append({
+                    "workspace": ws.name,
+                    "line": line.name if line else "All Lines",
+                    "sent": sent,
+                })
 
         return success_response(data={
             "date": target_date.isoformat(),
             "results": sent_results,
-            "message": f"Daily evening route emails triggered for {len(sent_results)} lines.",
+            "message": f"Daily evening route emails triggered for {len(sent_results)} route lines across {workspaces_qs.count()} workspace(s).",
         })
 
 
