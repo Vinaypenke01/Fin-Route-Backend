@@ -934,15 +934,23 @@ class TriggerDailyRouteEmailsView(APIView):
                 matching_lines = list(lines) if lines.exists() else [None]
 
             for line in matching_lines:
-                sent = RouteEmailReportService.send_route_email(
-                    workspace=ws,
-                    line=line,
-                    target_date=target_date,
-                )
+                sent = False
+                error_msg = None
+                try:
+                    sent = RouteEmailReportService.send_route_email(
+                        workspace=ws,
+                        line=line,
+                        target_date=target_date,
+                    )
+                except Exception as ex:
+                    logger.error("Error triggering route email for line %s in workspace %s: %s", line, ws.name, ex, exc_info=True)
+                    error_msg = str(ex)
+
                 sent_results.append({
                     "workspace": ws.name,
                     "line": line.name if line else "All Lines",
                     "sent": sent,
+                    "error": error_msg,
                 })
 
         return success_response(data={
