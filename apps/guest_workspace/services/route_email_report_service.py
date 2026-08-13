@@ -303,8 +303,8 @@ class RouteEmailReportService:
         if line:
             collections_qs = collections_qs.filter(customer__line=line)
 
-        paid_entries = collections_qs.filter(collected_amount__gt=0).exclude(status_code="skipped")
-        skipped_entries = collections_qs.filter(status_code="skipped")
+        paid_entries = collections_qs.filter(collected_amount__gt=0).exclude(status__code="skipped")
+        skipped_entries = collections_qs.filter(status__code="skipped")
 
         # 2. Query line customers for unpaid borrower breakdown
         line_customers_qs = CustomerProfile.objects.filter(workspace=workspace).select_related("line")
