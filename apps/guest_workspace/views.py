@@ -891,73 +891,85 @@ class TriggerDailyRouteEmailsView(APIView):
     permission_classes = [AllowAny]
 
     def post(self, request):
-        from django.conf import settings
-        import os
-        expected_secret = getattr(settings, 'CRON_SECRET_KEY', 'finroute_cron_secret_2026') or os.environ.get('CRON_SECRET_KEY', 'finroute_cron_secret_2026')
-        provided_secret = request.headers.get("X-Cron-Secret") or request.query_params.get("secret")
+        try:
+            from django.conf import settings
+            import os
+            expected_secret = getattr(settings, 'CRON_SECRET_KEY', 'finroute_cron_secret_2026') or os.environ.get('CRON_SECRET_KEY', 'finroute_cron_secret_2026')
+            provided_secret = request.headers.get("X-Cron-Secret") or request.query_params.get("secret")
 
-        is_authenticated_user = request.user and request.user.is_authenticated
-        if not is_authenticated_user and provided_secret != expected_secret:
-            return error_response(message="Authentication required or invalid X-Cron-Secret key.", status_code=403)
+            is_authenticated_user = request.user and request.user.is_authenticated
+            if not is_authenticated_user and provided_secret != expected_secret:
+                return error_response(message="Authentication required or invalid X-Cron-Secret key.", status_code=403)
 
-        date_str = request.data.get("date") if hasattr(request, "data") else None
-        target_date = dt_date.today()
-        if date_str:
+            date_str = None
             try:
-                target_date = datetime.strptime(date_str, "%Y-%m-%d").date()
-            except ValueError:
-                pass
-
-        today_weekday = target_date.strftime("%A").lower()
-        from apps.guest_workspace.services.route_email_report_service import RouteEmailReportService
-        from apps.guest_workspace.models import GuestWorkspace, CollectionLine
-
-        workspaces_qs = GuestWorkspace.objects.filter(is_active=True)
-
-        # If user is authenticated, limit to their workspace only
-        if request.user and request.user.is_authenticated:
-            try:
-                ws = GuestWorkspaceService.get_workspace(request.user)
-                workspaces_qs = GuestWorkspace.objects.filter(id=ws.id)
+                if hasattr(request, "data") and isinstance(request.data, dict):
+                    date_str = request.data.get("date")
             except Exception:
                 pass
+            if not date_str and hasattr(request, "query_params"):
+                date_str = request.query_params.get("date")
 
-        sent_results = []
-        for ws in workspaces_qs:
-            lines = CollectionLine.objects.filter(workspace=ws, is_active=True).prefetch_related("day_schedules")
-            matching_lines = []
-            for line in lines:
-                if line.day_schedules.filter(day_of_week__iexact=today_weekday).exists():
-                    matching_lines.append(line)
-
-            if not matching_lines:
-                matching_lines = list(lines) if lines.exists() else [None]
-
-            for line in matching_lines:
-                sent = False
-                error_msg = None
+            target_date = dt_date.today()
+            if date_str:
                 try:
-                    sent = RouteEmailReportService.send_route_email(
-                        workspace=ws,
-                        line=line,
-                        target_date=target_date,
-                    )
-                except Exception as ex:
-                    logger.error("Error triggering route email for line %s in workspace %s: %s", line, ws.name, ex, exc_info=True)
-                    error_msg = str(ex)
+                    target_date = datetime.strptime(str(date_str), "%Y-%m-%d").date()
+                except ValueError:
+                    pass
 
-                sent_results.append({
-                    "workspace": ws.name,
-                    "line": line.name if line else "All Lines",
-                    "sent": sent,
-                    "error": error_msg,
-                })
+            today_weekday = target_date.strftime("%A").lower()
+            from apps.guest_workspace.services.route_email_report_service import RouteEmailReportService
+            from apps.guest_workspace.models import GuestWorkspace, CollectionLine
 
-        return success_response(data={
-            "date": target_date.isoformat(),
-            "results": sent_results,
-            "message": f"Daily evening route emails triggered for {len(sent_results)} route lines across {workspaces_qs.count()} workspace(s).",
-        })
+            workspaces_qs = GuestWorkspace.objects.filter(is_active=True)
+
+            # If user is authenticated, limit to their workspace only
+            if request.user and request.user.is_authenticated:
+                try:
+                    ws = GuestWorkspaceService.get_workspace(request.user)
+                    workspaces_qs = GuestWorkspace.objects.filter(id=ws.id)
+                except Exception:
+                    pass
+
+            sent_results = []
+            for ws in workspaces_qs:
+                lines = CollectionLine.objects.filter(workspace=ws, is_active=True).prefetch_related("day_schedules")
+                matching_lines = []
+                for line in lines:
+                    if line.day_schedules.filter(day_of_week__iexact=today_weekday).exists():
+                        matching_lines.append(line)
+
+                if not matching_lines:
+                    matching_lines = list(lines) if lines.exists() else [None]
+
+                for line in matching_lines:
+                    sent = False
+                    error_msg = None
+                    try:
+                        sent = RouteEmailReportService.send_route_email(
+                            workspace=ws,
+                            line=line,
+                            target_date=target_date,
+                        )
+                    except Exception as ex:
+                        logger.error("Error triggering route email for line %s in workspace %s: %s", line, ws.name, ex, exc_info=True)
+                        error_msg = str(ex)
+
+                    sent_results.append({
+                        "workspace": ws.name,
+                        "line": line.name if line else "All Lines",
+                        "sent": sent,
+                        "error": error_msg,
+                    })
+
+            return success_response(data={
+                "date": target_date.isoformat(),
+                "results": sent_results,
+                "message": f"Daily evening route emails triggered for {len(sent_results)} route lines across {workspaces_qs.count()} workspace(s).",
+            })
+        except Exception as top_err:
+            logger.error("Unhandled error in TriggerDailyRouteEmailsView: %s", top_err, exc_info=True)
+            return error_response(message=f"Failed to trigger route emails: {str(top_err)}", status_code=500)
 
 
 class SendRouteClosureReportView(APIView):
@@ -980,14 +992,21 @@ class SendRouteClosureReportView(APIView):
         if not target_email:
             target_email = "owner@fin-route.site"
 
-        date_str = request.data.get("date")
-        line_param = request.data.get("line")
-        line_name = request.data.get("line_name", "Selected Route Line")
+        date_str = None
+        line_param = None
+        line_name = "Selected Route Line"
+        try:
+            if hasattr(request, "data") and isinstance(request.data, dict):
+                date_str = request.data.get("date")
+                line_param = request.data.get("line")
+                line_name = request.data.get("line_name", "Selected Route Line")
+        except Exception:
+            pass
 
         target_date = dt_date.today()
         if date_str:
             try:
-                target_date = datetime.strptime(date_str, "%Y-%m-%d").date()
+                target_date = datetime.strptime(str(date_str), "%Y-%m-%d").date()
             except ValueError:
                 pass
 
