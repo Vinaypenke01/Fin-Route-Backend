@@ -15,6 +15,7 @@ import logging
 from datetime import datetime, date as dt_date
 from rest_framework.views import APIView
 from rest_framework.permissions import IsAuthenticated, AllowAny
+from rest_framework import status
 from rest_framework.response import Response
 from django.http import HttpResponse
 from drf_spectacular.utils import extend_schema
@@ -899,7 +900,7 @@ class TriggerDailyRouteEmailsView(APIView):
 
             is_authenticated_user = request.user and request.user.is_authenticated
             if not is_authenticated_user and provided_secret != expected_secret:
-                return error_response(message="Authentication required or invalid X-Cron-Secret key.", status_code=403)
+                return error_response(message="Authentication required or invalid X-Cron-Secret key.", http_status=status.HTTP_403_FORBIDDEN)
 
             date_str = None
             try:
@@ -921,7 +922,7 @@ class TriggerDailyRouteEmailsView(APIView):
             from apps.guest_workspace.services.route_email_report_service import RouteEmailReportService
             from apps.guest_workspace.models import GuestWorkspace, CollectionLine
 
-            workspaces_qs = GuestWorkspace.objects.filter(is_active=True)
+            workspaces_qs = GuestWorkspace.objects.filter(status="active")
 
             # If user is authenticated, limit to their workspace only
             if request.user and request.user.is_authenticated:
@@ -969,7 +970,7 @@ class TriggerDailyRouteEmailsView(APIView):
             })
         except Exception as top_err:
             logger.error("Unhandled error in TriggerDailyRouteEmailsView: %s", top_err, exc_info=True)
-            return error_response(message=f"Failed to trigger route emails: {str(top_err)}", status_code=500)
+            return error_response(message=f"Failed to trigger route emails: {str(top_err)}", http_status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 class SendRouteClosureReportView(APIView):

@@ -44,7 +44,7 @@ class Command(BaseCommand):
         today_weekday = target_date.strftime("%A").lower()
         self.stdout.write(self.style.SUCCESS(f"🚀 Starting Evening Route Email Cron-Job for {today_weekday.capitalize()} ({target_date})..."))
 
-        workspaces_qs = GuestWorkspace.objects.filter(is_active=True)
+        workspaces_qs = GuestWorkspace.objects.filter(status="active")
         workspace_id = options.get("workspace_id")
         if workspace_id:
             workspaces_qs = workspaces_qs.filter(public_id=workspace_id)
