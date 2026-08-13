@@ -29,15 +29,28 @@ class AuthService:
     """
 
     @classmethod
-    def login_with_password(cls, mobile_number: str, password: str, ip: str = "", user_agent: str = ""):
+    def login_with_password(cls, identifier: str = "", password: str = "", ip: str = "", user_agent: str = "", **kwargs):
         from apps.common.validators import validate_mobile_number
+        from django.db.models import Q
 
-        try:
-            normalized = validate_mobile_number(mobile_number)
-        except Exception:
-            normalized = mobile_number
+        raw_identifier = (identifier or kwargs.get("mobile_number") or "").strip()
 
-        user = User.objects.filter(mobile_number=normalized).first()
+        user = None
+        if "@" in raw_identifier:
+            user = User.objects.filter(email__iexact=raw_identifier, is_active=True).first()
+        else:
+            try:
+                normalized = validate_mobile_number(raw_identifier)
+            except Exception:
+                normalized = raw_identifier
+
+            cleaned_digits = "".join(filter(str.isdigit, raw_identifier))
+
+            user = User.objects.filter(
+                Q(mobile_number=normalized) | Q(mobile_number=cleaned_digits) | Q(email__iexact=raw_identifier),
+                is_active=True,
+            ).first()
+
         if not user or not user.check_password(password):
             if user:
                 cls._record_login_history(
@@ -47,7 +60,7 @@ class AuthService:
                     status=LoginStatus.FAILED,
                     reason="Invalid password",
                 )
-            raise BusinessRuleException("Invalid mobile number or password.")
+            raise BusinessRuleException("Invalid email address / mobile number or password.")
 
         token_data = cls.issue_tokens(user, ip=ip, user_agent=user_agent)
         return user, token_data
@@ -119,6 +132,9 @@ class AuthService:
     @classmethod
     def reset_password(cls, mobile_number: str, otp: str, new_password: str) -> None:
         from apps.common.validators import validate_mobile_number
+        from apps.accounts.models import OTPVerification, OTPPurpose
+        from apps.accounts.services.otp_service import OTPService
+
         try:
             normalized = validate_mobile_number(mobile_number)
         except Exception:
@@ -127,6 +143,21 @@ class AuthService:
         user = User.objects.filter(mobile_number=normalized, is_active=True).first()
         if not user:
             raise BusinessRuleException("Account not found.")
+
+        # Verify OTP record exists and is verified
+        otp_record = (
+            OTPVerification.objects.filter(
+                mobile_number=normalized,
+                purpose=OTPPurpose.PASSWORD_RESET,
+            )
+            .order_by("-created_at")
+            .first()
+        )
+        if not otp_record:
+            raise BusinessRuleException("No active reset request found. Please request a new OTP.")
+
+        if not otp_record.is_verified:
+            OTPService.verify_otp(mobile_number=normalized, otp_plain=otp, purpose=OTPPurpose.PASSWORD_RESET)
 
         user.set_password(new_password)
         user.save(update_fields=["password", "updated_at"])

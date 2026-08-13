@@ -12,6 +12,7 @@ API Views for Guest Workspace:
 """
 
 import logging
+from datetime import datetime, date as dt_date
 from rest_framework.views import APIView
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -803,6 +804,7 @@ class DailyCashReconciliationView(APIView):
 
         workspace = GuestWorkspaceService.get_workspace(request.user)
         date_str = request.query_params.get("date")
+        line_param = request.query_params.get("line")
         target_date = dt_date.today()
         if date_str:
             try:
@@ -811,10 +813,14 @@ class DailyCashReconciliationView(APIView):
                 pass
 
         # 1. Collections Inflow
-        collections_agg = CollectionEntry.objects.filter(
+        collections_qs = CollectionEntry.objects.filter(
             workspace=workspace,
             collection_date=target_date,
-        ).aggregate(
+        )
+        if line_param and line_param != "all":
+            collections_qs = collections_qs.filter(customer__line__public_id=line_param)
+
+        collections_agg = collections_qs.aggregate(
             total=Sum("collected_amount"),
             count=Count("id"),
         )
@@ -829,10 +835,14 @@ class DailyCashReconciliationView(APIView):
         )
 
         # 3. Disbursements Outflow
-        disbursements_agg = CustomerProfile.objects.filter(
+        disbursements_qs = CustomerProfile.objects.filter(
             workspace=workspace,
             start_date=target_date,
-        ).aggregate(
+        )
+        if line_param and line_param != "all":
+            disbursements_qs = disbursements_qs.filter(line__public_id=line_param)
+
+        disbursements_agg = disbursements_qs.aggregate(
             total=Sum("disbursed_amount"),
             count=Count("id"),
         )
@@ -869,6 +879,349 @@ class DailyCashReconciliationView(APIView):
             "total_outflow": total_outflow,
             "net_cash_handheld": net_cash_handheld,
             "is_cash_deficit": net_cash_handheld < 0,
+        })
+
+
+class TriggerDailyRouteEmailsView(APIView):
+    """
+    POST /api/v1/app/reports/trigger-daily-emails/
+    Manually triggers the evening collection email dispatch with Excel attachments.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        workspace = GuestWorkspaceService.get_workspace(request.user)
+        date_str = request.data.get("date")
+        target_date = dt_date.today()
+        if date_str:
+            try:
+                target_date = datetime.strptime(date_str, "%Y-%m-%d").date()
+            except ValueError:
+                pass
+
+        today_weekday = target_date.strftime("%A").lower()
+        from apps.guest_workspace.services.route_email_report_service import RouteEmailReportService
+
+        lines = CollectionLine.objects.filter(workspace=workspace, is_active=True).prefetch_related("day_schedules")
+        matching_lines = []
+        for line in lines:
+            if line.day_schedules.filter(day_of_week__iexact=today_weekday).exists():
+                matching_lines.append(line)
+
+        if not matching_lines:
+            matching_lines = list(lines) if lines.exists() else [None]
+
+        sent_results = []
+        for line in matching_lines:
+            sent = RouteEmailReportService.send_route_email(
+                workspace=workspace,
+                line=line,
+                target_date=target_date,
+            )
+            sent_results.append({
+                "line": line.name if line else "All Lines",
+                "sent": sent,
+            })
+
+        return success_response(data={
+            "date": target_date.isoformat(),
+            "results": sent_results,
+            "message": f"Daily evening route emails triggered for {len(sent_results)} lines.",
+        })
+
+
+class SendRouteClosureReportView(APIView):
+    """
+    POST /api/v1/app/cash-reconciliation/send-report/
+    Generates and emails a full daily route reconciliation report to the workspace owner.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        workspace = GuestWorkspaceService.get_workspace(request.user)
+        target_email = request.user.email or getattr(request.user, "owner_email", None)
+        if not target_email and hasattr(workspace, "owner_email"):
+            target_email = workspace.owner_email
+        if not target_email and hasattr(request.user, "username") and "@" in request.user.username:
+            target_email = request.user.username
+
+        if not target_email:
+            target_email = "owner@fin-route.site"
+
+        date_str = request.data.get("date")
+        line_param = request.data.get("line")
+        line_name = request.data.get("line_name", "Selected Route Line")
+
+        target_date = dt_date.today()
+        if date_str:
+            try:
+                target_date = datetime.strptime(date_str, "%Y-%m-%d").date()
+            except ValueError:
+                pass
+
+        # 1. Paid Collection Entries
+        collections_qs = CollectionEntry.objects.filter(workspace=workspace, collection_date=target_date).select_related("customer")
+        if line_param and line_param != "all":
+            collections_qs = collections_qs.filter(customer__line__public_id=line_param)
+
+        paid_entries = collections_qs.filter(collected_amount__gt=0).exclude(status_code="skipped")
+        skipped_entries = collections_qs.filter(status_code="skipped")
+
+        # 2. Query line customers for unpaid borrower breakdown
+        line_customers_qs = CustomerProfile.objects.filter(workspace=workspace).select_related("line")
+        if line_param and line_param != "all":
+            line_customers_qs = line_customers_qs.filter(line__public_id=line_param)
+
+        paid_customer_ids = set(paid_entries.values_list("customer_id", flat=True))
+        logged_skipped_ids = set(skipped_entries.values_list("customer_id", flat=True))
+        unpaid_customers = line_customers_qs.exclude(id__in=paid_customer_ids | logged_skipped_ids)
+
+        # 3. Query Capital
+        capital_agg = CapitalEntry.objects.filter(workspace=workspace, entry_date=target_date).aggregate(total=Sum("amount"), count=Count("id"))
+
+        # 4. Query Disbursements
+        disbursements_qs = CustomerProfile.objects.filter(workspace=workspace, start_date=target_date)
+        if line_param and line_param != "all":
+            disbursements_qs = disbursements_qs.filter(line__public_id=line_param)
+        disbursements_agg = disbursements_qs.aggregate(total=Sum("disbursed_amount"), count=Count("id"))
+
+        # 5. Query Expenses
+        expenses_agg = Expense.objects.filter(workspace=workspace, expense_date=target_date).aggregate(total=Sum("amount"), count=Count("id"))
+
+        col_tot = float(paid_entries.aggregate(total=Sum("collected_amount"))["total"] or 0)
+        cap_tot = float(capital_agg["total"] or 0)
+        disb_tot = float(disbursements_agg["total"] or 0)
+        exp_tot = float(expenses_agg["total"] or 0)
+        net_cash = (col_tot + cap_tot) - (disb_tot + exp_tot)
+
+        # Build Paid Customers HTML Rows
+        paid_rows_html = ""
+        for p in paid_entries:
+            c = p.customer
+            c_name = c.full_name if c else (p.customer_name or "N/A")
+            c_code = c.customer_code if c else (p.customer_code or "")
+            paid_rows_html += f"""
+            <tr style="border-bottom: 1px solid #e2e8f0;">
+              <td style="padding: 10px 12px; font-weight: 700; color: #1e293b;">{c_name} <span style="font-size: 11px; font-weight: normal; color: #64748b;">({c_code})</span></td>
+              <td style="padding: 10px 12px; font-family: monospace; font-weight: 800; color: #059669; text-align: right;">+₹{float(p.collected_amount):,.2f}</td>
+              <td style="padding: 10px 12px; text-align: center;"><span style="background: #ecfdf5; color: #047857; padding: 2px 8px; border-radius: 12px; font-size: 11px; font-weight: 700;">Paid</span></td>
+            </tr>
+            """
+        if not paid_rows_html:
+            paid_rows_html = """<tr><td colspan="3" style="padding: 12px; text-align: center; color: #94a3b8; font-size: 12px;">No payment receipts recorded for this route today.</td></tr>"""
+
+        # Build Skipped & Unpaid Customers HTML Rows
+        skipped_rows_html = ""
+        for s in skipped_entries:
+            c = s.customer
+            c_name = c.full_name if c else (s.customer_name or "N/A")
+            c_code = c.customer_code if c else (s.customer_code or "")
+            skipped_rows_html += f"""
+            <tr style="border-bottom: 1px solid #e2e8f0;">
+              <td style="padding: 10px 12px; font-weight: 700; color: #1e293b;">{c_name} <span style="font-size: 11px; font-weight: normal; color: #64748b;">({c_code})</span></td>
+              <td style="padding: 10px 12px; font-family: monospace; font-weight: 700; color: #e11d48; text-align: right;">Skipped</td>
+              <td style="padding: 10px 12px; text-align: center;"><span style="background: #fff1f2; color: #e11d48; padding: 2px 8px; border-radius: 12px; font-size: 11px; font-weight: 700;">Skipped</span></td>
+            </tr>
+            """
+        for u in unpaid_customers:
+            skipped_rows_html += f"""
+            <tr style="border-bottom: 1px solid #e2e8f0;">
+              <td style="padding: 10px 12px; font-weight: 700; color: #1e293b;">{u.full_name} <span style="font-size: 11px; font-weight: normal; color: #64748b;">({u.customer_code})</span></td>
+              <td style="padding: 10px 12px; font-family: monospace; font-weight: 700; color: #d97706; text-align: right;">₹{float(u.installment_amount or u.loan_amount or 0):,.2f}</td>
+              <td style="padding: 10px 12px; text-align: center;"><span style="background: #fef3c7; color: #b45309; padding: 2px 8px; border-radius: 12px; font-size: 11px; font-weight: 700;">Unpaid</span></td>
+            </tr>
+            """
+        if not skipped_rows_html:
+            skipped_rows_html = """<tr><td colspan="3" style="padding: 12px; text-align: center; color: #059669; font-size: 12px;">🎉 100% Collection Completed! All borrowers paid today.</td></tr>"""
+
+        # Build New Disbursements HTML Rows
+        disbursed_rows_html = ""
+        for d in disbursements_qs:
+            disbursed_rows_html += f"""
+            <tr style="border-bottom: 1px solid #e2e8f0;">
+              <td style="padding: 10px 12px; font-weight: 700; color: #1e293b;">{d.full_name} <span style="font-size: 11px; font-weight: normal; color: #64748b;">({d.customer_code})</span></td>
+              <td style="padding: 10px 12px; font-family: monospace; font-weight: 800; color: #7c3aed; text-align: right;">−₹{float(d.disbursed_amount):,.2f}</td>
+              <td style="padding: 10px 12px; text-align: center;"><span style="background: #f3e8ff; color: #6b21a8; padding: 2px 8px; border-radius: 12px; font-size: 11px; font-weight: 700;">New Loan</span></td>
+            </tr>
+            """
+
+        subject = f"FinRoute Daily Closure Report: {line_name} ({target_date.strftime('%d %b %Y')})"
+
+        html_message = f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <meta charset="utf-8">
+          <style>
+            body {{ font-family: 'Segoe UI', Arial, sans-serif; background-color: #f4f6f9; color: #1e293b; margin: 0; padding: 20px; }}
+            .container {{ max-width: 650px; margin: 0 auto; background: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 10px 25px rgba(0,0,0,0.08); border: 1px solid #e2e8f0; }}
+            .header {{ background: linear-gradient(135deg, #059669 0%, #047857 100%); padding: 28px 24px; text-align: center; color: #ffffff; }}
+            .header h1 {{ margin: 0; font-size: 22px; font-weight: 800; letter-spacing: -0.5px; }}
+            .header p {{ margin: 6px 0 0 0; opacity: 0.9; font-size: 13px; }}
+            .body {{ padding: 24px; }}
+            .badge {{ display: inline-block; background: #ecfdf5; color: #047857; padding: 6px 14px; border-radius: 20px; font-weight: 700; font-size: 12px; border: 1px solid #a7f3d0; margin-bottom: 20px; }}
+            .card {{ background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 16px; text-align: left; }}
+            .card-title {{ font-size: 11px; font-weight: 700; text-transform: uppercase; color: #64748b; margin-bottom: 4px; }}
+            .card-val {{ font-size: 20px; font-weight: 800; font-family: monospace; margin: 0; }}
+            .green {{ color: #059669; }}
+            .blue {{ color: #2563eb; }}
+            .purple {{ color: #7c3aed; }}
+            .rose {{ color: #e11d48; }}
+            .section-header {{ font-size: 14px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.5px; color: #334155; margin: 24px 0 10px 0; border-bottom: 2px solid #e2e8f0; padding-bottom: 6px; }}
+            .table-container {{ width: 100%; border-collapse: collapse; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 10px; overflow: hidden; margin-bottom: 16px; font-size: 13px; }}
+            .table-container th {{ background: #f1f5f9; padding: 10px 12px; text-align: left; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #475569; }}
+            .summary-box {{ background: #ecfdf5; border: 1px solid #a7f3d0; border-radius: 14px; padding: 20px; margin-top: 20px; }}
+            .summary-title {{ font-size: 12px; font-weight: 800; text-transform: uppercase; color: #065f46; }}
+            .summary-val {{ font-size: 26px; font-weight: 900; color: #047857; font-family: monospace; margin-top: 4px; }}
+            .footer {{ background: #f1f5f9; padding: 20px; text-align: center; font-size: 12px; color: #64748b; border-top: 1px solid #e2e8f0; }}
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <div class="header">
+              <h1>📊 FinRoute Daily Route Closure Report</h1>
+              <p>{workspace.name} • {line_name}</p>
+            </div>
+            <div class="body">
+              <div style="text-align: center;">
+                <span class="badge">📅 Route Date: {target_date.strftime('%d %B %Y')}</span>
+              </div>
+
+              <!-- 4-PILLAR RECONCILIATION CARDS -->
+              <table width="100%" style="border-collapse: separate; border-spacing: 8px;">
+                <tr>
+                  <td width="50%">
+                    <div class="card">
+                      <div class="card-title">📥 Collections ({paid_entries.count()} Paid)</div>
+                      <div class="card-val green">₹{col_tot:,.2f}</div>
+                    </div>
+                  </td>
+                  <td width="50%">
+                    <div class="card">
+                      <div class="card-title">💵 Starting Cash ({capital_agg['count'] or 0} Injected)</div>
+                      <div class="card-val blue">₹{cap_tot:,.2f}</div>
+                    </div>
+                  </td>
+                </tr>
+                <tr>
+                  <td width="50%">
+                    <div class="card">
+                      <div class="card-title">📤 Disbursed ({disbursements_agg['count'] or 0} New Loans)</div>
+                      <div class="card-val purple">₹{disb_tot:,.2f}</div>
+                    </div>
+                  </td>
+                  <td width="50%">
+                    <div class="card">
+                      <div class="card-title">💸 Expenses ({expenses_agg['count'] or 0} Entries)</div>
+                      <div class="card-val rose">₹{exp_tot:,.2f}</div>
+                    </div>
+                  </td>
+                </tr>
+              </table>
+
+              <!-- NET CASH SUMMARY BOX -->
+              <div class="summary-box">
+                <div class="summary-title">💰 Final Closing Handheld Cash</div>
+                <div style="font-size: 11px; color: #047857; margin-top: 2px;">(Starting Cash + Collections) − (Disbursements + Expenses)</div>
+                <div class="summary-val">₹{net_cash:,.2f}</div>
+              </div>
+
+              <!-- 1. PAID BORROWERS LIST -->
+              <div class="section-header" style="color: #059669;">📥 Paid Customers ({paid_entries.count()})</div>
+              <table class="table-container">
+                <thead>
+                  <tr>
+                    <th>Borrower Name & Code</th>
+                    <th style="text-align: right;">Amount Paid</th>
+                    <th style="text-align: center;">Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {paid_rows_html}
+                </tbody>
+              </table>
+
+              <!-- 2. SKIPPED & UNPAID BORROWERS LIST -->
+              <div class="section-header" style="color: #e11d48;">🔴 Skipped / Unpaid Customers ({skipped_entries.count() + unpaid_customers.count()})</div>
+              <table class="table-container">
+                <thead>
+                  <tr>
+                    <th>Borrower Name & Code</th>
+                    <th style="text-align: right;">Installment Due</th>
+                    <th style="text-align: center;">Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {skipped_rows_html}
+                </tbody>
+              </table>
+
+              <!-- 3. NEW BORROWER DISBURSEMENTS (IF ANY) -->
+              {f'''
+              <div class="section-header" style="color: #7c3aed;">📤 New Loan Disbursements ({disbursements_qs.count()})</div>
+              <table class="table-container">
+                <thead>
+                  <tr>
+                    <th>Borrower Name & Code</th>
+                    <th style="text-align: right;">Loan Disbursed</th>
+                    <th style="text-align: center;">Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {disbursed_rows_html}
+                </tbody>
+              </table>
+              ''' if disbursed_rows_html else ''}
+
+            </div>
+            <div class="footer">
+              Automated Route Reconciliation Report generated by <b>FinRoute Platform</b>.<br/>
+              © 2026 FinRoute Finance Systems.
+            </div>
+          </div>
+        </body>
+        </html>
+        """
+
+        from django.conf import settings
+        from django.core.mail import send_mail
+
+        email_sent = False
+        resend_key = getattr(settings, 'RESEND_API_KEY', '') or os.environ.get('RESEND_API_KEY', '')
+        if resend_key:
+            try:
+                import resend
+                resend.api_key = resend_key
+                resend.Emails.send({
+                    "from": "FinRoute Reports <info@fin-route.site>",
+                    "to": [target_email],
+                    "subject": subject,
+                    "html": html_message,
+                })
+                email_sent = True
+                logger.info("Sent route closure email via Resend API to %s", target_email)
+            except Exception as r_err:
+                logger.warning("Resend email error: %s. Trying django send_mail...", r_err)
+
+        if not email_sent:
+            try:
+                send_mail(
+                    subject=subject,
+                    message=f"Daily Route Closure Report for {line_name} on {target_date}.\nFinal Cash in Hand: ₹{net_cash:,.2f}",
+                    html_message=html_message,
+                    from_email=getattr(settings, 'DEFAULT_FROM_EMAIL', 'FinRoute <info@fin-route.site>'),
+                    recipient_list=[target_email],
+                    fail_silently=False,
+                )
+                email_sent = True
+                logger.info("Sent route closure email via Django send_mail to %s", target_email)
+            except Exception as e_err:
+                logger.error("Failed to send route closure email: %s", e_err)
+
+        return success_response(data={
+            "email_sent": email_sent,
+            "recipient": target_email,
+            "message": f"Daily route closure report emailed to {target_email}",
         })
 
 
@@ -962,4 +1315,5 @@ class AvailablePortionsView(APIView):
             exclude_line_id=int(exclude_id) if exclude_id and str(exclude_id).isdigit() else None,
         )
         return success_response(data=portions)
+
 

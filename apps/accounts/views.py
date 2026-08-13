@@ -114,18 +114,16 @@ class OTPVerifyView(APIView):
 
             otp_record = OTPService.verify_otp(mobile_number=mobile, otp_plain=otp, purpose=purpose)
             
-            from apps.accounts.models import User
+            from apps.accounts.models import User, OTPPurpose
             user = otp_record.user or User.objects.filter(mobile_number=mobile).first()
 
-            if user:
+            token_data = None
+            if user and purpose != OTPPurpose.PASSWORD_RESET:
                 user.is_mobile_verified = True
                 user.save(update_fields=["is_mobile_verified", "updated_at"])
-
-            token_data = None
-            if user:
                 token_data = AuthService.issue_tokens(user, get_client_ip(request), get_user_agent(request))
 
-            return success_response(data=token_data, message="OTP verified successfully.")
+            return success_response(data=token_data or {"verified": True}, message="OTP verified successfully.")
         except Exception as e:
             logger.error("OTP verification error: %s", e)
             return error_response(message=getattr(e, "detail", str(e)) or "Invalid or expired OTP.")
@@ -162,11 +160,11 @@ class LoginView(APIView):
         if not serializer.is_valid():
             return error_response(errors=serializer.errors)
 
-        mobile = serializer.validated_data["mobile_number"]
+        identifier = serializer.validated_data.get("identifier") or serializer.validated_data.get("mobile_number")
         password = serializer.validated_data["password"]
 
         user, token_data = AuthService.login_with_password(
-            mobile_number=mobile,
+            identifier=identifier,
             password=password,
             ip=get_client_ip(request),
             user_agent=get_user_agent(request),
@@ -191,18 +189,50 @@ class LogoutView(APIView):
 class ForgotPasswordView(APIView):
     """POST /api/v1/auth/password/forgot/"""
     permission_classes = [AllowAny]
-    serializer_class = PasswordResetRequestSerializer
 
     def post(self, request):
-        serializer = PasswordResetRequestSerializer(data=request.data)
-        if not serializer.is_valid():
-            return error_response(errors=serializer.errors)
+        raw_identifier = (request.data.get("email") or request.data.get("mobile_number") or request.data.get("identifier") or "").strip()
+        if not raw_identifier:
+            return error_response(message="Please enter your registered email address or mobile number.")
 
-        mobile = serializer.validated_data["mobile_number"]
-        otp_plain = OTPService.generate_and_store_otp(mobile_number=mobile, purpose=OTPPurpose.PASSWORD_RESET)
-        OTPService.send_otp(mobile_number=mobile, otp_plain=otp_plain, purpose=OTPPurpose.PASSWORD_RESET)
+        from apps.accounts.models import User, OTPPurpose
+        from django.db.models import Q
+        
+        user = User.objects.filter(
+            Q(email__iexact=raw_identifier) | Q(mobile_number=raw_identifier),
+            is_active=True,
+        ).first()
 
-        return success_response(message="Password reset OTP sent.")
+        if not user:
+            cleaned = "".join(filter(str.isdigit, raw_identifier))
+            if cleaned:
+                user = User.objects.filter(mobile_number=cleaned, is_active=True).first()
+
+        if not user:
+            return error_response(message="No active account found with that email address or mobile number.")
+
+        target_email = user.email
+        otp_plain = OTPService.generate_and_store_otp(
+            mobile_number=user.mobile_number,
+            purpose=OTPPurpose.PASSWORD_RESET,
+            user=user,
+        )
+        OTPService.send_otp(
+            mobile_number=user.mobile_number,
+            otp_plain=otp_plain,
+            purpose=OTPPurpose.PASSWORD_RESET,
+            recipient_email=target_email,
+        )
+
+        masked_email = ""
+        if target_email and "@" in target_email:
+            parts = target_email.split("@")
+            name = parts[0]
+            masked_name = name[0] + "*" * max(len(name) - 2, 1) + (name[-1] if len(name) > 1 else "")
+            masked_email = f"{masked_name}@{parts[1]}"
+
+        msg = f"A 6-digit password reset OTP has been sent to your email ({masked_email})." if masked_email else "Password reset OTP sent to your registered email."
+        return success_response(data={"mobile_number": user.mobile_number, "email": target_email}, message=msg)
 
 
 class ResetPasswordView(APIView):

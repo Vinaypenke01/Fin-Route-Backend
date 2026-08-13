@@ -27,6 +27,8 @@ from apps.guest_workspace.views import (
     CapitalEntryView,
     CapitalEntryDetailView,
     DailyCashReconciliationView,
+    SendRouteClosureReportView,
+    TriggerDailyRouteEmailsView,
     LineListCreateView,
     LineDetailView,
     AvailablePortionsView,
@@ -62,12 +64,14 @@ urlpatterns = [
     path("capital/", CapitalEntryView.as_view(), name="app-capital-list-create"),
     path("capital/<uuid:public_id>/", CapitalEntryDetailView.as_view(), name="app-capital-detail"),
     path("cash-reconciliation/", DailyCashReconciliationView.as_view(), name="app-cash-reconciliation"),
+    path("cash-reconciliation/send-report/", SendRouteClosureReportView.as_view(), name="app-cash-reconciliation-send-report"),
 
     # Reports
     path("reports/collections/", ReportsCollectionsView.as_view(), name="app-reports-collections"),
     path("reports/customers/", ReportsCustomersView.as_view(), name="app-reports-customers"),
     path("reports/expenses/", ReportsExpensesView.as_view(), name="app-reports-expenses"),
     path("reports/export/", ReportsExportView.as_view(), name="app-reports-export"),
+    path("reports/trigger-daily-emails/", TriggerDailyRouteEmailsView.as_view(), name="app-reports-trigger-daily-emails"),
 
     # Calculator, Upgrade & Backup
     path("calculator/", CalculatorView.as_view(), name="app-calculator"),
