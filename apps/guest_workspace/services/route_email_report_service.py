@@ -281,10 +281,15 @@ class RouteEmailReportService:
         if not target_date:
             target_date = dt_date.today()
 
+        # Extract guest user email address (workspace.owner is the Guest User)
+        if not recipient_email and hasattr(workspace, "owner") and workspace.owner:
+            guest_user = workspace.owner
+            recipient_email = getattr(guest_user, "email", None)
+            if not recipient_email and hasattr(guest_user, "username") and "@" in str(guest_user.username):
+                recipient_email = guest_user.username
+
         if not recipient_email:
-            recipient_email = getattr(workspace.owner, "email", None) or workspace.owner_email
-        if not recipient_email and hasattr(workspace.owner, "username") and "@" in workspace.owner.username:
-            recipient_email = workspace.owner.username
+            recipient_email = "owner@fin-route.site"
 
         if not recipient_email:
             logger.warning("No valid recipient email address found for workspace %s", workspace.name)

@@ -961,11 +961,13 @@ class SendRouteClosureReportView(APIView):
 
     def post(self, request):
         workspace = GuestWorkspaceService.get_workspace(request.user)
-        target_email = request.user.email or getattr(request.user, "owner_email", None)
-        if not target_email and hasattr(workspace, "owner_email"):
-            target_email = workspace.owner_email
-        if not target_email and hasattr(request.user, "username") and "@" in request.user.username:
-            target_email = request.user.username
+        # Extract guest user email address
+        guest_user = request.user
+        target_email = getattr(guest_user, "email", None)
+        if not target_email and hasattr(workspace, "owner") and workspace.owner:
+            target_email = getattr(workspace.owner, "email", None)
+        if not target_email and hasattr(guest_user, "username") and "@" in str(guest_user.username):
+            target_email = guest_user.username
 
         if not target_email:
             target_email = "owner@fin-route.site"
