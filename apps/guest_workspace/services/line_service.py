@@ -203,7 +203,22 @@ class LineService:
             )
 
         logger.info("Created CollectionLine '%s' (ID: %s) for workspace '%s'", line.name, line.public_id, workspace.name)
+        LineService.sync_workspace_allowed_days(workspace)
         return line
+
+    @staticmethod
+    def sync_workspace_allowed_days(workspace: GuestWorkspace) -> None:
+        """
+        Auto-syncs workspace.allowed_collection_days based on active collection lines.
+        """
+        days = list(
+            LineDaySchedule.objects.filter(line__workspace=workspace, line__is_active=True)
+            .values_list("day_of_week", flat=True)
+            .distinct()
+        )
+        if days:
+            workspace.allowed_collection_days = days
+            workspace.save(update_fields=["allowed_collection_days"])
 
     @staticmethod
     @transaction.atomic
@@ -249,6 +264,7 @@ class LineService:
                     portion=portion,
                 )
 
+        LineService.sync_workspace_allowed_days(workspace)
         return line
 
     @staticmethod
@@ -261,6 +277,7 @@ class LineService:
         line.is_active = False
         line.save()
         logger.info("Deactivated CollectionLine '%s' (ID: %s)", line.name, line.public_id)
+        LineService.sync_workspace_allowed_days(workspace)
 
     @staticmethod
     @transaction.atomic

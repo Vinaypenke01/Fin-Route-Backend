@@ -72,17 +72,30 @@ class CustomerService:
         else:
             interest_type_id = interest_type_val or 1
 
-        is_existing_borrower = validated_data.get("is_existing_borrower", False)
-        amount_already_collected = validated_data.get("amount_already_collected", 0) or 0
-        installments_paid_count = validated_data.get("installments_paid_count", 0) or 0
-        remaining_installments_count = validated_data.get("remaining_installments_count", 1) or 1
-        total_installments = validated_data.get("total_installments") or (installments_paid_count + remaining_installments_count if is_existing_borrower else remaining_installments_count)
+        is_existing_borrower = validated_data.pop("is_existing_borrower", False)
+        amount_already_collected = validated_data.pop("amount_already_collected", 0) or 0
+        installments_paid_count = validated_data.pop("installments_paid_count", 0) or 0
+        remaining_installments_count = validated_data.pop("remaining_installments_count", 1) or 1
+        total_installments = validated_data.pop("total_installments", None) or (installments_paid_count + remaining_installments_count if is_existing_borrower else remaining_installments_count)
 
-        installment_amount = validated_data.get("installment_amount")
+        installment_amount = validated_data.pop("installment_amount", None)
         if not installment_amount or float(installment_amount) <= 0:
             installment_amount = (float(total_due) / total_installments) if total_installments > 0 else 0.0
 
         outstanding_balance = max(0.0, float(total_due) - float(amount_already_collected))
+
+        raw_line = validated_data.pop("line", None)
+        line_obj = None
+        if raw_line and str(raw_line).lower() not in ("null", "none", ""):
+            from apps.guest_workspace.models import CollectionLine
+            if hasattr(raw_line, "id"):
+                line_obj = raw_line
+            elif str(raw_line).isdigit():
+                line_obj = CollectionLine.objects.filter(workspace=workspace, id=int(raw_line)).first()
+            else:
+                line_obj = CollectionLine.objects.filter(workspace=workspace, public_id=str(raw_line)).first()
+
+        portion_val = validated_data.pop("portion", None) or "both"
 
         customer = CustomerProfile.objects.create(
             workspace=workspace,
@@ -298,7 +311,9 @@ class CustomerService:
                 customer.line = None
             else:
                 from apps.guest_workspace.models import CollectionLine
-                if str(raw_line).isdigit():
+                if hasattr(raw_line, "id"):
+                    line_obj = raw_line
+                elif str(raw_line).isdigit():
                     line_obj = CollectionLine.objects.filter(workspace=workspace, id=int(raw_line)).first()
                 else:
                     line_obj = CollectionLine.objects.filter(workspace=workspace, public_id=str(raw_line)).first()
