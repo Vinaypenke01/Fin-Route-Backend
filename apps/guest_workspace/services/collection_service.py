@@ -211,7 +211,8 @@ class CollectionService:
             if date_to := filters.get("date_to"):
                 queryset = queryset.filter(collection_date__lte=date_to)
             if customer_id := filters.get("customer"):
-                queryset = queryset.filter(customer__public_id=customer_id)
+                from django.db.models import Q
+                queryset = queryset.filter(Q(customer__public_id=customer_id) | Q(customer__customer_code__iexact=customer_id))
             if status := filters.get("status"):
                 queryset = queryset.filter(status__code=status)
             if payment_mode := filters.get("payment_mode"):
