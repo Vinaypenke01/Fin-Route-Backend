@@ -218,3 +218,58 @@ class AccountService:
             ),
         ]
         UserConsent.objects.bulk_create(consent_records)
+
+    @staticmethod
+    @transaction.atomic
+    def delete_account(user: User) -> None:
+        """
+        DPDP Act 2023 Section 12 — Right to Erasure.
+        Soft-deactivates user, revokes active sessions, and anonymizes personal identifiable data.
+        """
+        from apps.accounts.models import UserSession
+        from apps.audit_logs.services import AuditLogService
+        from apps.audit_logs.models import ActionType
+
+        # 1. Log erasure action before purging details
+        AuditLogService.log_action(
+            user=user,
+            action=ActionType.DELETE,
+            target_model="User",
+            target_id=str(user.public_id),
+            description="User requested DPDP Act Section 12 Account & Personal Data Erasure",
+        )
+
+        # 2. Deactivate active sessions
+        UserSession.objects.filter(user=user, is_active=True).update(is_active=False, revoked_at=timezone.now())
+
+        # 3. Soft-delete / anonymize user model fields
+        user.is_active = False
+        user.full_name = "Anonymized User"
+        if user.email:
+            user.email = f"erased_{user.id}@erased.local"
+        user.save(update_fields=["is_active", "full_name", "email", "updated_at"])
+
+        logger.info("Account & personal data erased for user_id=%s under DPDP Act Section 12", user.id)
+
+    @staticmethod
+    def export_personal_data(user: User) -> dict:
+        """
+        DPDP Act 2023 Section 11 — Right to Access Information.
+        Returns a complete summary of user's personal data and processing metadata.
+        """
+        from apps.accounts.serializers import UserProfileSerializer
+
+        user_data = UserProfileSerializer(user).data
+        consents = list(
+            UserConsent.objects.filter(user=user).values(
+                "consent_type", "version", "is_agreed", "agreed_at"
+            )
+        )
+
+        return {
+            "act_reference": "Digital Personal Data Protection Act 2023 — Section 11",
+            "export_timestamp": timezone.now().isoformat(),
+            "profile": user_data,
+            "consents_given": consents,
+        }
+

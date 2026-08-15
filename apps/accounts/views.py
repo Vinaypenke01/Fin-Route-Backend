@@ -276,29 +276,44 @@ class ChangePasswordView(APIView):
 # ─── User Profile ─────────────────────────────────────────────────────────────
 
 class MeView(APIView):
-    """GET/PATCH /api/v1/auth/me/ — User Profile"""
+    """GET/PATCH /api/v1/auth/me/ — Profile endpoints"""
     permission_classes = [IsAuthenticated]
     serializer_class = UserProfileSerializer
 
-    @extend_schema(responses={200: UserProfileSerializer})
+    @extend_schema(summary="Get current user profile", responses={200: UserProfileSerializer})
     def get(self, request):
-        serializer = UserProfileSerializer(request.user)
-        return success_response(data=serializer.data)
+        user = AccountService.get_profile(request.user)
+        return success_response(data=UserProfileSerializer(user).data)
 
-    @extend_schema(request=UserProfileUpdateSerializer, responses={200: UserProfileSerializer})
+    @extend_schema(summary="Update current user profile", request=UserProfileUpdateSerializer)
     def patch(self, request):
-        serializer = UserProfileUpdateSerializer(
-            request.user,
-            data=request.data,
-            partial=True,
-            context={"request": request},
-        )
+        serializer = UserProfileUpdateSerializer(data=request.data, partial=True)
         if not serializer.is_valid():
             return error_response(errors=serializer.errors)
 
-        updated_user = AccountService.update_profile(request.user, serializer.validated_data)
-        output = UserProfileSerializer(updated_user)
-        return success_response(data=output.data, message="Profile updated successfully.")
+        user = AccountService.update_profile(request.user, serializer.validated_data)
+        return success_response(
+            data=UserProfileSerializer(user).data,
+            message="Profile updated successfully.",
+        )
+
+
+class UserExportDataView(APIView):
+    """GET /api/v1/auth/me/export-data/ — DPDP Act Section 11 Right to Access Data"""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        data = AccountService.export_personal_data(request.user)
+        return success_response(data=data, message="Personal data export generated successfully.")
+
+
+class UserDeleteAccountView(APIView):
+    """POST /api/v1/auth/me/delete-account/ — DPDP Act Section 12 Right to Erasure"""
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        AccountService.delete_account(request.user)
+        return success_response(message="Account and personal data have been erased successfully.")
 
 
 class UserActivityView(APIView):

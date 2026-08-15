@@ -17,6 +17,8 @@ from apps.accounts.views import (
     ResetPasswordView,
     ChangePasswordView,
     MeView,
+    UserExportDataView,
+    UserDeleteAccountView,
     UserActivityView,
     UserSessionListView,
     UserSessionRevokeView,
@@ -45,6 +47,8 @@ urlpatterns = [
     # Current User Profile & Activity Log
     path("me/", MeView.as_view(), name="auth-me"),
     path("me/activity/", UserActivityView.as_view(), name="auth-me-activity"),
+    path("me/export-data/", UserExportDataView.as_view(), name="auth-me-export-data"),
+    path("me/delete-account/", UserDeleteAccountView.as_view(), name="auth-me-delete-account"),
 
     # Active Sessions & Device Management
     path("sessions/", UserSessionListView.as_view(), name="auth-sessions"),
