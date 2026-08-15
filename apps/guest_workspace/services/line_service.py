@@ -269,14 +269,35 @@ class LineService:
 
     @staticmethod
     @transaction.atomic
-    def delete_line(workspace: GuestWorkspace, line_public_id: str) -> None:
+    def delete_line(
+        workspace: GuestWorkspace,
+        line_public_id: str,
+        mode: str = "unassign",
+        target_line_public_id: str = None,
+    ) -> None:
         """
-        Soft-delete / deactivate a line.
+        Deactivate / delete a line.
+        - mode='reassign': Move linked customers to target_line_public_id
+        - mode='delete_customers': Permanently delete all linked customers & payment records
+        - mode='unassign': Set customer.line = None
         """
+        from apps.guest_workspace.models import CustomerProfile
         line = LineService.get_line_detail(workspace, line_public_id)
+
+        if mode == "reassign" and target_line_public_id:
+            try:
+                target_line = CollectionLine.objects.get(workspace=workspace, public_id=target_line_public_id, is_active=True)
+                CustomerProfile.objects.filter(workspace=workspace, line=line).update(line=target_line)
+            except CollectionLine.DoesNotExist:
+                raise BusinessRuleException("Target route line for reassignment not found.")
+        elif mode == "delete_customers":
+            # Hard delete customers linked to this line as well as any unassigned customers & their CASCADE collection entries
+            CustomerProfile.objects.filter(workspace=workspace, line=line).delete()
+            CustomerProfile.objects.filter(workspace=workspace, line__isnull=True).delete()
+
         line.is_active = False
         line.save()
-        logger.info("Deactivated CollectionLine '%s' (ID: %s)", line.name, line.public_id)
+        logger.info("Deactivated CollectionLine '%s' (ID: %s, mode: %s)", line.name, line.public_id, mode)
         LineService.sync_workspace_allowed_days(workspace)
 
     @staticmethod
