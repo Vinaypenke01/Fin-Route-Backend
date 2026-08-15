@@ -139,7 +139,7 @@ class CustomerService:
             workspace.name,
         )
 
-        if is_existing_borrower and float(amount_already_collected) > 0:
+        if is_existing_borrower and (float(amount_already_collected) > 0 or int(installments_paid_count or 0) > 0):
             try:
                 from datetime import date as date_type, timedelta
                 from apps.guest_workspace.models import CollectionEntry
@@ -152,6 +152,13 @@ class CustomerService:
 
                 inst_amt = float(installment_amount) if installment_amount and float(installment_amount) > 0 else (float(total_due) / total_installments if total_installments > 0 else 0.0)
                 paid_count = int(installments_paid_count or 0)
+
+                # Auto-calculate amount_already_collected if 0 but paid_count > 0
+                if float(amount_already_collected) <= 0 and paid_count > 0 and inst_amt > 0:
+                    amount_already_collected = paid_count * inst_amt
+                    customer.amount_already_collected = amount_already_collected
+                    customer.outstanding_balance = max(0.0, float(total_due) - float(amount_already_collected))
+                    customer.save(update_fields=["amount_already_collected", "outstanding_balance"])
 
                 if paid_count > 0 and inst_amt > 0:
                     for i in range(paid_count):
