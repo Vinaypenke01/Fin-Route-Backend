@@ -313,11 +313,26 @@ class RouteEmailReportService:
 
         paid_customer_ids = set(paid_entries.values_list("customer_id", flat=True))
         logged_skipped_ids = set(skipped_entries.values_list("customer_id", flat=True))
-        unpaid_customers = line_customers_qs.exclude(id__in=paid_customer_ids | logged_skipped_ids)
+        unpaid_customers = [
+            c for c in line_customers_qs.exclude(id__in=paid_customer_ids | logged_skipped_ids)
+            if float(c.outstanding_balance or 0) > 0
+            and c.status != "closed"
+            and (not c.start_date or c.start_date <= target_date)
+        ]
 
         # 3. Aggregates
         col_tot = float(paid_entries.aggregate(total=Sum("collected_amount"))["total"] or 0)
-        cap_tot = float(CapitalEntry.objects.filter(workspace=workspace, entry_date=target_date).aggregate(total=Sum("amount"))["total"] or 0)
+
+        # Cumulative net cash carried forward from previous days (up to target_date - 1)
+        prev_collections = float(CollectionEntry.objects.filter(workspace=workspace, collection_date__lt=target_date).aggregate(total=Sum("collected_amount"))["total"] or 0)
+        prev_capital = float(CapitalEntry.objects.filter(workspace=workspace, entry_date__lt=target_date).aggregate(total=Sum("amount"))["total"] or 0)
+        prev_disbursements = float(CustomerProfile.objects.filter(workspace=workspace, start_date__lt=target_date).aggregate(total=Sum("disbursed_amount"))["total"] or 0)
+        prev_expenses = float(Expense.objects.filter(workspace=workspace, expense_date__lt=target_date).aggregate(total=Sum("amount"))["total"] or 0)
+
+        carried_forward_starting_cash = (prev_collections + prev_capital) - (prev_disbursements + prev_expenses)
+        today_capital = float(CapitalEntry.objects.filter(workspace=workspace, entry_date=target_date).aggregate(total=Sum("amount"))["total"] or 0)
+
+        cap_tot = max(0.0, carried_forward_starting_cash) + today_capital
 
         disbursements_qs = CustomerProfile.objects.filter(workspace=workspace, start_date=target_date)
         if line:

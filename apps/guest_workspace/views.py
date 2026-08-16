@@ -804,23 +804,39 @@ class DailyCashReconciliationView(APIView):
     def get(self, request):
         try:
             from datetime import date as dt_date, datetime
-            from django.db.models import Sum, Count
+            from django.db.models import Sum, Count, Q
             from apps.guest_workspace.models import CustomerProfile, CollectionEntry, Expense, CapitalEntry
 
             workspace = GuestWorkspaceService.get_workspace(request.user)
-            date_str = request.query_params.get("date")
+            date_from_str = request.query_params.get("date_from") or request.query_params.get("date")
+            date_to_str = request.query_params.get("date_to") or request.query_params.get("date")
             line_param = request.query_params.get("line")
-            target_date = dt_date.today()
-            if date_str:
+
+            start_date_val = dt_date.today()
+            end_date_val = dt_date.today()
+
+            if date_from_str:
                 try:
-                    target_date = datetime.strptime(date_str, "%Y-%m-%d").date()
+                    start_date_val = datetime.strptime(date_from_str, "%Y-%m-%d").date()
                 except ValueError:
                     pass
+
+            if date_to_str:
+                try:
+                    end_date_val = datetime.strptime(date_to_str, "%Y-%m-%d").date()
+                except ValueError:
+                    pass
+
+            if end_date_val < start_date_val:
+                end_date_val = start_date_val
+
+            target_date = start_date_val
 
             # 1. Collections Inflow
             collections_qs = CollectionEntry.objects.filter(
                 workspace=workspace,
-                collection_date=target_date,
+                collection_date__gte=start_date_val,
+                collection_date__lte=end_date_val,
             )
             if line_param and line_param != "all":
                 collections_qs = collections_qs.filter(customer__line__public_id=line_param)
@@ -833,7 +849,8 @@ class DailyCashReconciliationView(APIView):
             # 2. Capital Injections Inflow
             capital_agg = CapitalEntry.objects.filter(
                 workspace=workspace,
-                entry_date=target_date,
+                entry_date__gte=start_date_val,
+                entry_date__lte=end_date_val,
             ).aggregate(
                 total=Sum("amount"),
                 count=Count("id"),
@@ -842,7 +859,8 @@ class DailyCashReconciliationView(APIView):
             # 3. Disbursements Outflow
             disbursements_qs = CustomerProfile.objects.filter(
                 workspace=workspace,
-                start_date=target_date,
+                start_date__gte=start_date_val,
+                start_date__lte=end_date_val,
             )
             if line_param and line_param != "all":
                 disbursements_qs = disbursements_qs.filter(Q(line__public_id=line_param) | Q(line__isnull=True))
@@ -855,7 +873,8 @@ class DailyCashReconciliationView(APIView):
             # 4. Expenses Outflow
             expenses_qs = Expense.objects.filter(
                 workspace=workspace,
-                expense_date=target_date,
+                expense_date__gte=start_date_val,
+                expense_date__lte=end_date_val,
             )
             expenses_agg = expenses_qs.aggregate(
                 total=Sum("amount"),
@@ -866,21 +885,21 @@ class DailyCashReconciliationView(APIView):
             disbursements_total = float(disbursements_agg["total"] or 0)
             expenses_total = float(expenses_agg["total"] or 0)
 
-            # 5. Historical Opening Cash (Carried Forward from Previous Days)
-            hist_cols_qs = CollectionEntry.objects.filter(workspace=workspace, collection_date__lt=target_date)
+            # 5. Historical Opening Cash (Carried Forward from Before start_date_val)
+            hist_cols_qs = CollectionEntry.objects.filter(workspace=workspace, collection_date__lt=start_date_val)
             if line_param and line_param != "all":
                 hist_cols_qs = hist_cols_qs.filter(customer__line__public_id=line_param)
             hist_cols_tot = float(hist_cols_qs.aggregate(total=Sum("collected_amount"))["total"] or 0)
 
-            hist_cap_qs = CapitalEntry.objects.filter(workspace=workspace, entry_date__lt=target_date)
+            hist_cap_qs = CapitalEntry.objects.filter(workspace=workspace, entry_date__lt=start_date_val)
             hist_cap_tot = float(hist_cap_qs.aggregate(total=Sum("amount"))["total"] or 0)
 
-            hist_disb_qs = CustomerProfile.objects.filter(workspace=workspace, start_date__lt=target_date)
+            hist_disb_qs = CustomerProfile.objects.filter(workspace=workspace, start_date__lt=start_date_val)
             if line_param and line_param != "all":
                 hist_disb_qs = hist_disb_qs.filter(Q(line__public_id=line_param) | Q(line__isnull=True))
             hist_disb_tot = float(hist_disb_qs.aggregate(total=Sum("disbursed_amount"))["total"] or 0)
 
-            hist_exp_qs = Expense.objects.filter(workspace=workspace, expense_date__lt=target_date)
+            hist_exp_qs = Expense.objects.filter(workspace=workspace, expense_date__lt=start_date_val)
             hist_exp_tot = float(hist_exp_qs.aggregate(total=Sum("amount"))["total"] or 0)
 
             opening_carried_forward = (hist_cols_tot + hist_cap_tot) - (hist_disb_tot + hist_exp_tot)

@@ -256,7 +256,9 @@ class CustomerService:
 
             portion_val = filters.get("portion")
             if portion_val and str(portion_val).lower() not in ("all", "undefined", "null", ""):
-                queryset = queryset.filter(portion=str(portion_val).lower())
+                queryset = queryset.filter(
+                    models.Q(portion=str(portion_val).lower()) | models.Q(portion="both") | models.Q(portion__isnull=True) | models.Q(portion="")
+                )
 
         return queryset.order_by("sequence_number", "customer_code")
 

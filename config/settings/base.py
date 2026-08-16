@@ -181,11 +181,11 @@ REST_FRAMEWORK = {
         "rest_framework.throttling.UserRateThrottle",
     ],
     "DEFAULT_THROTTLE_RATES": {
-        "anon": "100/hour",
-        "user": "1000/hour",
-        "auth_login": "10/minute",
-        "auth_otp": "5/minute",
-        "auth_forgot_password": "3/minute",
+        "anon": "1000/hour",
+        "user": "10000/hour",
+        "auth_login": "20/minute",
+        "auth_otp": "10/minute",
+        "auth_forgot_password": "5/minute",
     },
 }
 
