@@ -5,6 +5,7 @@ CustomerService handles all customer CRUD and balance management.
 """
 
 import logging
+from decimal import Decimal
 from django.db import transaction
 
 from apps.common.exceptions import CustomerNotFoundException, BusinessRuleException
@@ -82,9 +83,15 @@ class CustomerService:
         if not installment_amount or float(installment_amount) <= 0:
             installment_amount = (float(total_due) / total_installments) if total_installments > 0 else 0.0
 
-        outstanding_balance = max(0.0, float(total_due) - float(amount_already_collected))
+        passed_outstanding = validated_data.pop("outstanding_balance", None)
+        if passed_outstanding is not None:
+            outstanding_balance = passed_outstanding
+        else:
+            outstanding_balance = max(0.0, float(total_due) - float(amount_already_collected))
 
-        raw_line = validated_data.pop("line", None)
+        status_val = validated_data.pop("status", None)
+
+        raw_line = validated_data.pop("line", None) or validated_data.pop("line_id", None)
         line_obj = None
         if raw_line and str(raw_line).lower() not in ("null", "none", ""):
             from apps.guest_workspace.models import CollectionLine
@@ -97,23 +104,40 @@ class CustomerService:
 
         portion_val = validated_data.pop("portion", None) or "both"
 
+        interest_rate_val = Decimal(str(validated_data.pop("interest_rate", 0) or 0))
+
+        create_kwargs = {
+            "workspace": workspace,
+            "customer_code": customer_code,
+            "created_by": created_by,
+            "collection_frequency_id": collection_frequency_id,
+            "interest_type_id": interest_type_id,
+            "interest_rate": interest_rate_val,
+            "total_due": total_due,
+            "outstanding_balance": outstanding_balance,
+            "is_existing_borrower": is_existing_borrower,
+            "total_installments": total_installments,
+            "installments_paid_count": installments_paid_count,
+            "remaining_installments_count": remaining_installments_count,
+            "amount_already_collected": amount_already_collected,
+            "installment_amount": installment_amount,
+            "line": line_obj,
+            "portion": portion_val,
+        }
+        seq_num = validated_data.pop("sequence_number", None)
+        if seq_num is not None:
+            create_kwargs["sequence_number"] = seq_num
+
+        remarks_val = validated_data.pop("remarks", None)
+        if remarks_val and "notes" not in validated_data and "notes" not in create_kwargs:
+            create_kwargs["notes"] = remarks_val
+
+        valid_field_names = {f.name for f in CustomerProfile._meta.get_fields()}
+        extra_kwargs = {k: v for k, v in validated_data.items() if k in valid_field_names}
+
         customer = CustomerProfile.objects.create(
-            workspace=workspace,
-            customer_code=customer_code,
-            created_by=created_by,
-            collection_frequency_id=collection_frequency_id,
-            interest_type_id=interest_type_id,
-            total_due=total_due,
-            outstanding_balance=outstanding_balance,
-            is_existing_borrower=is_existing_borrower,
-            total_installments=total_installments,
-            installments_paid_count=installments_paid_count,
-            remaining_installments_count=remaining_installments_count,
-            amount_already_collected=amount_already_collected,
-            installment_amount=installment_amount,
-            line=line_obj,
-            portion=portion_val,
-            **validated_data,
+            **create_kwargs,
+            **extra_kwargs,
         )
 
         from apps.audit_logs.services import AuditLogService as AuditService
@@ -130,7 +154,7 @@ class CustomerService:
             action=ActionType.CREATE,
             target_model="CustomerProfile",
             target_id=str(customer.public_id),
-            description=f"Added new borrower '{customer.full_name}' ({customer.customer_code}) with loan amount ₹{customer.loan_amount}",
+            description=f"Added new borrower '{customer.full_name}' ({customer.customer_code}) with loan amount Rs. {customer.loan_amount}",
         )
 
         logger.info(

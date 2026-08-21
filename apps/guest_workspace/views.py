@@ -1440,3 +1440,99 @@ class AvailablePortionsView(APIView):
         return success_response(data=portions)
 
 
+# ─── Digital Migration & Onboarding Views ───────────────────────────────────
+
+class MigrationCutoverView(APIView):
+    """
+    POST /api/v1/guest-workspace/onboarding/cutover/
+    Sets up the Day 1 Cutover baseline opening cash float.
+    """
+    permission_classes = [IsAuthenticated, IsGuestUser]
+
+    def post(self, request):
+        workspace = GuestWorkspaceService.get_workspace(request.user)
+        from apps.guest_workspace.serializers import MigrationCutoverSerializer
+        from apps.guest_workspace.services.onboarding_service import onboarding_service
+
+        serializer = MigrationCutoverSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        entry = onboarding_service.initialize_cutover_baseline(
+            workspace=workspace,
+            cutover_date=serializer.validated_data["cutover_date"],
+            opening_cash=serializer.validated_data["opening_cash"],
+            user=request.user,
+        )
+
+        return success_response(
+            data={
+                "public_id": str(entry.public_id),
+                "cutover_date": str(entry.entry_date),
+                "opening_cash": str(entry.amount),
+                "remarks": entry.remarks,
+            },
+            message="Cutover baseline initialized successfully.",
+        )
+
+
+class ExistingBorrowerBulkImportView(APIView):
+    """
+    POST /api/v1/guest-workspace/onboarding/bulk-borrowers/
+    Imports active existing borrowers with prior paper payment history in a single atomic request.
+    """
+    permission_classes = [IsAuthenticated, IsGuestUser]
+
+    def post(self, request):
+        workspace = GuestWorkspaceService.get_workspace(request.user)
+        from apps.guest_workspace.serializers import ExistingBorrowerBulkImportSerializer
+        from apps.guest_workspace.services.onboarding_service import onboarding_service
+
+        serializer = ExistingBorrowerBulkImportSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        result = onboarding_service.bulk_onboard_existing_borrowers(
+            workspace=workspace,
+            borrower_data_list=serializer.validated_data["borrowers"],
+            user=request.user,
+        )
+
+        return success_response(
+            data=result,
+            message=f"Successfully imported {result['imported_count']} existing borrowers.",
+        )
+
+
+class HistoricalAdjustmentView(APIView):
+    """
+    POST /api/v1/guest-workspace/onboarding/historical-adjustment/
+    Records an optional pre-digital lump-sum P&L overhead adjustment.
+    """
+    permission_classes = [IsAuthenticated, IsGuestUser]
+
+    def post(self, request):
+        workspace = GuestWorkspaceService.get_workspace(request.user)
+        from apps.guest_workspace.serializers import HistoricalAdjustmentSerializer
+        from apps.guest_workspace.services.onboarding_service import onboarding_service
+
+        serializer = HistoricalAdjustmentSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        entry = onboarding_service.record_historical_lumpsum_adjustment(
+            workspace=workspace,
+            amount=serializer.validated_data["amount"],
+            category=serializer.validated_data["type"],
+            remarks=serializer.validated_data.get("description", ""),
+            user=request.user,
+        )
+
+        return success_response(
+            data={
+                "public_id": str(entry.public_id),
+                "amount": str(entry.amount),
+                "remarks": getattr(entry, "remarks", getattr(entry, "description", "")),
+            },
+            message="Historical adjustment recorded successfully.",
+        )
+
+
+

@@ -32,9 +32,17 @@ from apps.guest_workspace.views import (
     LineListCreateView,
     LineDetailView,
     AvailablePortionsView,
+    MigrationCutoverView,
+    ExistingBorrowerBulkImportView,
+    HistoricalAdjustmentView,
 )
 
 urlpatterns = [
+    # Digital Migration & Onboarding Suite
+    path("onboarding/cutover/", MigrationCutoverView.as_view(), name="app-onboarding-cutover"),
+    path("onboarding/bulk-borrowers/", ExistingBorrowerBulkImportView.as_view(), name="app-onboarding-bulk-borrowers"),
+    path("onboarding/historical-adjustment/", HistoricalAdjustmentView.as_view(), name="app-onboarding-historical-adjustment"),
+
     # Lines (Routes)
     path("lines/", LineListCreateView.as_view(), name="app-line-list-create"),
     path("lines/available-portions/", AvailablePortionsView.as_view(), name="app-line-available-portions"),
