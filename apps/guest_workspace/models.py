@@ -147,7 +147,7 @@ class GuestWorkspace(BasePublicModel):
     def max_allowed_collection_days(self) -> int:
         if self.max_collection_days_override is not None:
             return self.max_collection_days_override
-        base_days = 1  # Free tier base: 1 day per week
+        base_days = 2  # Free tier base: 2 lines / collection days
         total_days = base_days + self.purchased_additional_days
         return min(total_days, 7)
 

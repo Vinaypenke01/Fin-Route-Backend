@@ -114,7 +114,7 @@ class LineService:
         - Premium Plan: Unlimited active route lines.
         """
         if getattr(workspace, "subscription_plan", "free") == "free":
-            max_allowed_lines = getattr(workspace, "max_allowed_collection_days", 3) or 3
+            max_allowed_lines = getattr(workspace, "max_allowed_collection_days", 2) or 2
             existing_lines_qs = CollectionLine.objects.filter(
                 workspace=workspace,
                 is_active=True,

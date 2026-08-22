@@ -129,8 +129,11 @@ class CustomerService:
         if seq_num is not None:
             create_kwargs["sequence_number"] = seq_num
 
-        if start_date_val:
-            create_kwargs["start_date"] = start_date_val
+        if not start_date_val:
+            from django.utils import timezone
+            start_date_val = timezone.now().date()
+
+        create_kwargs["start_date"] = start_date_val
 
         remarks_val = validated_data.pop("remarks", None)
         if remarks_val and "notes" not in validated_data and "notes" not in create_kwargs:
