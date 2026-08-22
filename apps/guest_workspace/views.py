@@ -974,9 +974,8 @@ class TriggerDailyRouteEmailsView(APIView):
 
             today_weekday = target_date.strftime("%A").lower()
             from apps.guest_workspace.services.route_email_report_service import RouteEmailReportService
-            from apps.guest_workspace.models import GuestWorkspace, CollectionLine
-
-            workspaces_qs = GuestWorkspace.objects.filter(status="active")
+            # Only active Paid Premium workspaces (users with unlocked screens) receive daily report emails
+            workspaces_qs = GuestWorkspace.objects.filter(status="active", subscription_plan="premium")
 
             # If user is authenticated, limit to their workspace only
             if request.user and request.user.is_authenticated:

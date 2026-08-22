@@ -108,54 +108,26 @@ class LineService:
         exclude_line_id: int = None,
     ) -> None:
         """
-        Validates that total active collection sessions and unique days across ALL active lines
-        in the workspace do NOT exceed workspace.max_allowed_collection_days (Plan limit).
+        Validates line creation against workspace subscription plan limits.
         Rules:
-        - max_allowed_days = workspace.max_allowed_collection_days
-        - max_allowed_sessions = max_allowed_days * 2
-        - portion 'both' counts as 2 sessions (1.0 full day).
-        - portion 'morning' or 'afternoon' counts as 1 session (0.5 day).
+        - Free Plan: Up to 3 active route lines max.
+        - Premium Plan: Unlimited active route lines.
         """
-        existing_schedules_qs = LineDaySchedule.objects.filter(
-            line__workspace=workspace,
-            line__is_active=True,
-        )
-        if exclude_line_id:
-            existing_schedules_qs = existing_schedules_qs.exclude(line_id=exclude_line_id)
-
-        existing_schedules = list(existing_schedules_qs.values("day_of_week", "portion"))
-
-        combined_schedules = existing_schedules + [
-            {
-                "day_of_week": s.get("day_of_week", "").lower(),
-                "portion": s.get("portion", DayPortionChoices.BOTH).lower(),
-            }
-            for s in new_or_updated_schedules
-        ]
-
-        total_sessions = 0
-        unique_days = set()
-
-        for s in combined_schedules:
-            day = s.get("day_of_week")
-            portion = s.get("portion")
-            if not day:
-                continue
-            unique_days.add(day)
-            if portion == DayPortionChoices.BOTH:
-                total_sessions += 2
-            else:
-                total_sessions += 1
-
-        max_allowed_days = workspace.max_allowed_collection_days
-        max_allowed_sessions = max_allowed_days * 2
-
-        if total_sessions > max_allowed_sessions:
-            raise BusinessRuleException(
-                f"Your {workspace.subscription_plan.capitalize()} plan allows up to {max_allowed_sessions} session(s) max per week "
-                f"({max_allowed_days} full day equivalent). Your configured route schedules require {total_sessions} session(s). "
-                f"Please upgrade your plan to unlock more collection sessions or routes."
+        if getattr(workspace, "subscription_plan", "free") == "free":
+            max_allowed_lines = getattr(workspace, "max_allowed_collection_days", 3) or 3
+            existing_lines_qs = CollectionLine.objects.filter(
+                workspace=workspace,
+                is_active=True,
             )
+            if exclude_line_id:
+                existing_lines_qs = existing_lines_qs.exclude(id=exclude_line_id)
+
+            # Check if user is creating a NEW line beyond configured line quota (e.g. 2 or 3 lines)
+            if not exclude_line_id and existing_lines_qs.count() >= max_allowed_lines:
+                raise BusinessRuleException(
+                    f"Your Free Plan permits operating on a maximum of {max_allowed_lines} Route Lines. "
+                    f"Please upgrade your plan to unlock more route lines!"
+                )
 
     @staticmethod
     @transaction.atomic

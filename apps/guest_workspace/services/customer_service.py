@@ -74,10 +74,11 @@ class CustomerService:
             interest_type_id = interest_type_val or 1
 
         is_existing_borrower = validated_data.pop("is_existing_borrower", False)
-        amount_already_collected = validated_data.pop("amount_already_collected", 0) or 0
-        installments_paid_count = validated_data.pop("installments_paid_count", 0) or 0
+        amount_already_collected = validated_data.pop("amount_already_collected", None) or validated_data.pop("paid_amount_till_date", 0) or 0
+        installments_paid_count = validated_data.pop("installments_paid_count", None) or validated_data.pop("paid_installments_count", 0) or 0
         remaining_installments_count = validated_data.pop("remaining_installments_count", 1) or 1
         total_installments = validated_data.pop("total_installments", None) or (installments_paid_count + remaining_installments_count if is_existing_borrower else remaining_installments_count)
+        start_date_val = validated_data.pop("start_date", None) or validated_data.pop("loan_start_date", None)
 
         installment_amount = validated_data.pop("installment_amount", None)
         if not installment_amount or float(installment_amount) <= 0:
@@ -127,6 +128,9 @@ class CustomerService:
         seq_num = validated_data.pop("sequence_number", None)
         if seq_num is not None:
             create_kwargs["sequence_number"] = seq_num
+
+        if start_date_val:
+            create_kwargs["start_date"] = start_date_val
 
         remarks_val = validated_data.pop("remarks", None)
         if remarks_val and "notes" not in validated_data and "notes" not in create_kwargs:

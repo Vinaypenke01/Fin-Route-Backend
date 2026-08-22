@@ -255,9 +255,12 @@ class CustomerCreateUpdateSerializer(serializers.Serializer):
     is_existing_borrower = serializers.BooleanField(required=False, default=False)
     total_installments = serializers.IntegerField(required=False, default=1)
     installments_paid_count = serializers.IntegerField(required=False, default=0)
+    paid_installments_count = serializers.IntegerField(required=False, default=0)
     remaining_installments_count = serializers.IntegerField(required=False, default=1)
     amount_already_collected = serializers.DecimalField(max_digits=12, decimal_places=2, required=False, default=0)
+    paid_amount_till_date = serializers.DecimalField(max_digits=12, decimal_places=2, required=False, default=0)
     installment_amount = serializers.DecimalField(max_digits=12, decimal_places=2, required=False, default=0)
+    loan_start_date = serializers.DateField(required=False, allow_null=True)
 
     def validate_mobile_number(self, value):
         if value:

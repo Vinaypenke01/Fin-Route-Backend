@@ -281,6 +281,11 @@ class RouteEmailReportService:
         if not target_date:
             target_date = dt_date.today()
 
+        # Only Paid Premium workspaces (unlocked screen access) are eligible for daily report emails
+        if getattr(workspace, "subscription_plan", "free") != "premium":
+            logger.info("Workspace '%s' is not on Premium plan (%s). Skipping daily report email.", workspace.name, workspace.subscription_plan)
+            return False
+
         # Extract guest user email address (workspace.owner is the Guest User)
         if not recipient_email and hasattr(workspace, "owner") and workspace.owner:
             guest_user = workspace.owner

@@ -256,9 +256,7 @@ class CollectionService:
         """Update a collection entry and recalculate the customer balance."""
         collection = CollectionService.get_collection_detail(workspace, collection_public_id)
 
-        if collection.is_edited or collection.edit_count >= 1:
-            raise BusinessRuleException("This collection entry has already been edited once and cannot be modified again.")
-
+        # Post-closing historical edit access allowed for workspace owner
         changes = {}
         allowed_fields = ["collection_date", "collected_amount", "expected_amount", "remarks"]
         
