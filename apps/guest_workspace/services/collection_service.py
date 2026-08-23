@@ -207,9 +207,20 @@ class CollectionService:
 
         if filters:
             if date_from := filters.get("date_from"):
-                queryset = queryset.filter(collection_date__gte=date_from)
+                try:
+                    from datetime import datetime
+                    parsed_from = datetime.strptime(str(date_from), "%Y-%m-%d").date()
+                    queryset = queryset.filter(collection_date__gte=parsed_from)
+                except ValueError:
+                    pass
+
             if date_to := filters.get("date_to"):
-                queryset = queryset.filter(collection_date__lte=date_to)
+                try:
+                    from datetime import datetime
+                    parsed_to = datetime.strptime(str(date_to), "%Y-%m-%d").date()
+                    queryset = queryset.filter(collection_date__lte=parsed_to)
+                except ValueError:
+                    pass
             if customer_id := filters.get("customer"):
                 from django.db.models import Q
                 queryset = queryset.filter(Q(customer__public_id=customer_id) | Q(customer__customer_code__iexact=customer_id))
