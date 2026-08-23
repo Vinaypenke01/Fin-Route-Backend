@@ -259,3 +259,25 @@ class CustomerReviewSubmitView(APIView):
                 message="Review submitted successfully! It will appear on the landing page once approved by an administrator.",
             )
         return error_response(message="Invalid review data.", errors=serializer.errors)
+
+
+class PublicConfigView(APIView):
+    """
+    GET /api/v1/masters/public-config/
+    Public API returning SaaS pricing, WhatsApp support numbers, and admin configurations.
+    """
+    permission_classes = [AllowAny]
+
+    def get(self, request):
+        from apps.administration.models import GlobalConfiguration
+        configs = GlobalConfiguration.objects.filter(is_active=True)
+        config_dict = {c.key: c.value for c in configs}
+
+        return success_response(data={
+            "upgrade_price": config_dict.get("finroute_admin_upgrade_price", "499"),
+            "max_free_lines": config_dict.get("finroute_admin_max_free_lines", "3 Lines"),
+            "upgraded_lines": config_dict.get("finroute_admin_upgraded_lines", "Unlimited Lines"),
+            "plan_duration": config_dict.get("finroute_admin_plan_duration", "1 Month (30 Days)"),
+            "whatsapp_number": config_dict.get("finroute_admin_whatsapp_number", "919876543210"),
+            "whatsapp_template": config_dict.get("finroute_admin_whatsapp_template", ""),
+        })

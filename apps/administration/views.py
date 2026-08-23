@@ -671,9 +671,12 @@ class AdminUpgradeRequestDetailView(APIView):
 
             if new_status == "approved":
                 workspace = req_obj.workspace
-                workspace.purchased_additional_days = req_obj.additional_days
-                if req_obj.additional_days > 0:
+                if req_obj.plan_code == "full_module_unlock" or req_obj.additional_days == 0:
                     workspace.subscription_plan = "premium"
+                else:
+                    workspace.purchased_additional_days = req_obj.additional_days
+                    if req_obj.additional_days > 0:
+                        workspace.subscription_plan = "premium"
                 workspace.save()
 
         return success_response(

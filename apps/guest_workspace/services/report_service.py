@@ -27,7 +27,7 @@ class ReportService:
         """
         queryset = CollectionEntry.objects.filter(workspace=workspace).select_related(
             "customer", "status", "payment_mode"
-        )
+        ).exclude(remarks__icontains="opening balance").exclude(remarks__icontains="initial opening")
 
         if date_from := params.get("date_from"):
             queryset = queryset.filter(collection_date__gte=date_from)

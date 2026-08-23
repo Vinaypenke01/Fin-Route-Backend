@@ -17,6 +17,7 @@ from apps.masters.views import (
     BusinessCategoryListView,
     PublicLandingDataView,
     CustomerReviewSubmitView,
+    PublicConfigView,
 )
 
 urlpatterns = [
@@ -26,9 +27,10 @@ urlpatterns = [
     path("cities/", CityListView.as_view(), name="master-cities"),
     path("postal/", PostalLookupView.as_view(), name="master-postal"),
 
-    # Public Landing Page Data & Review Submission
+    # Public Landing Page Data & Review Submission & Config
     path("public-landing/", PublicLandingDataView.as_view(), name="master-public-landing"),
     path("reviews/submit/", CustomerReviewSubmitView.as_view(), name="master-reviews-submit"),
+    path("public-config/", PublicConfigView.as_view(), name="master-public-config"),
 
     # Domain Reference Data
     path("collection-frequencies/", CollectionFrequencyListView.as_view(), name="master-collection-frequencies"),

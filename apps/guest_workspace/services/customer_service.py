@@ -396,33 +396,39 @@ class CustomerService:
     @transaction.atomic
     def recalculate_outstanding(customer: CustomerProfile) -> None:
         """
-        Recalculate the outstanding balance and paid installment counters.
+        Recalculate the outstanding balance and paid installment counters accurately.
         Called by CollectionService after every collection event.
         """
         from django.db.models import Sum
-        paid_qs = customer.collections.filter(status__affects_outstanding=True)
+        paid_qs = customer.collections.filter(status__code="paid")
 
-        # Exclude opening balance entries from regular collection count
-        regular_collections_qs = paid_qs.exclude(remarks__icontains="initial opening")
-        new_regular_collections_count = regular_collections_qs.count()
+        db_paid_count = paid_qs.count()
+        db_paid_total = float(paid_qs.aggregate(total=Sum("collected_amount"))["total"] or 0)
 
-        # Calculate total collected from regular collections
-        regular_paid_total = regular_collections_qs.aggregate(total=Sum("collected_amount"))["total"] or 0
         opening_collected = float(customer.amount_already_collected or 0)
-
-        # Calculate initial paid installments from amount_already_collected / installment_amount or initial record
         total_installments = customer.total_installments or 20
         inst_amt = float(customer.installment_amount or 0)
 
-        if customer.is_existing_borrower and inst_amt > 0 and opening_collected > 0:
-            initial_paid = int(round(opening_collected / inst_amt))
+        # Check if DB has opening collection entries (containing "Opening balance" or "initial opening" in remarks)
+        has_opening_entries = paid_qs.filter(models.Q(remarks__icontains="Opening balance") | models.Q(remarks__icontains="initial opening")).exists()
+
+        if has_opening_entries:
+            # All payments (opening + subsequent) are recorded as CollectionEntry rows
+            effective_paid_count = db_paid_count
+            total_collected_amount = db_paid_total
         else:
-            initial_paid = 0
+            # Fallback if opening payments were saved only on CustomerProfile without CollectionEntry rows
+            if customer.is_existing_borrower and inst_amt > 0 and opening_collected > 0:
+                initial_paid = int(round(opening_collected / inst_amt))
+            else:
+                initial_paid = 0
 
-        effective_paid_count = min(total_installments, initial_paid + new_regular_collections_count)
+            effective_paid_count = initial_paid + db_paid_count
+            total_collected_amount = opening_collected + db_paid_total
+
+        effective_paid_count = min(total_installments, effective_paid_count)
         remaining_count = max(0, total_installments - effective_paid_count)
-
-        new_balance = max(0.0, float(customer.total_due) - opening_collected - float(regular_paid_total))
+        new_balance = max(0.0, float(customer.total_due) - total_collected_amount)
 
         CustomerProfile.objects.filter(pk=customer.pk).update(
             outstanding_balance=new_balance,
