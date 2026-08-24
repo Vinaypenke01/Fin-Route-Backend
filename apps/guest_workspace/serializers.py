@@ -48,12 +48,14 @@ class GuestWorkspaceSerializer(serializers.ModelSerializer):
             "state",
             "pin_code",
             "subscription_plan",
+            "subscription_start_date",
+            "subscription_end_date",
             "status",
             "allowed_collection_days",
             "max_allowed_collection_days",
             "created_at",
         ]
-        read_only_fields = ["public_id", "subscription_plan", "status", "max_allowed_collection_days", "created_at"]
+        read_only_fields = ["public_id", "subscription_plan", "subscription_start_date", "subscription_end_date", "status", "max_allowed_collection_days", "created_at"]
 
 
 class PlanUpgradeRequestSerializer(serializers.ModelSerializer):

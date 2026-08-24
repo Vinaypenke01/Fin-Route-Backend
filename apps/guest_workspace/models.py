@@ -12,7 +12,7 @@ Design rules:
 - All workspace-scoped models include `workspace` as the first FK.
 """
 
-from django.db import models
+from django.db import models  # type: ignore
 from apps.common.models import BaseModel, BasePublicModel
 
 
@@ -91,12 +91,22 @@ class GuestWorkspace(BasePublicModel):
     business_type = models.CharField(max_length=100, blank=True, null=True, default="")
     owner_pan = models.CharField(max_length=20, blank=True, null=True, default="")
 
-    # --- Subscription ---
+    # --- Subscription & Membership Dates (Per User Workspace) ---
     subscription_plan = models.CharField(
         max_length=20,
         choices=SubscriptionPlan.choices,
         default=SubscriptionPlan.FREE,
         db_index=True,
+    )
+    subscription_start_date = models.DateField(
+        null=True,
+        blank=True,
+        help_text="Start date of current paid subscription membership for this user workspace.",
+    )
+    subscription_end_date = models.DateField(
+        null=True,
+        blank=True,
+        help_text="Expiry / end date of current paid subscription membership for this user workspace.",
     )
     status = models.CharField(
         max_length=20,
@@ -133,7 +143,8 @@ class GuestWorkspace(BasePublicModel):
         ordering = ["-created_at"]
 
     def __str__(self):
-        return f"{self.name} ({self.owner.mobile_number}) [{self.subscription_plan}]"
+        owner_mobile = getattr(self.owner, "mobile_number", "") if self.owner else ""
+        return f"{self.name} ({owner_mobile}) [{self.subscription_plan}]"
 
     @property
     def is_active(self):
@@ -146,9 +157,10 @@ class GuestWorkspace(BasePublicModel):
     @property
     def max_allowed_collection_days(self) -> int:
         if self.max_collection_days_override is not None:
-            return self.max_collection_days_override
+            return getattr(self, "max_collection_days_override", 2)
         base_days = 2  # Free tier base: 2 lines / collection days
-        total_days = base_days + self.purchased_additional_days
+        purchased = getattr(self, "purchased_additional_days", 0) or 0
+        total_days = base_days + purchased
         return min(total_days, 7)
 
 

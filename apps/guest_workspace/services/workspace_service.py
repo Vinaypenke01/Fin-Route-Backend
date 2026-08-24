@@ -8,7 +8,7 @@ GuestWorkspaceService handles all workspace-level business logic:
 """
 
 import logging
-from django.db import transaction
+from django.db import transaction  # type: ignore
 
 from apps.common.exceptions import (
     PlanLimitExceededException,
@@ -45,7 +45,7 @@ class GuestWorkspaceService:
 
     @staticmethod
     @transaction.atomic
-    def create_default_workspace(owner, name: str = None) -> GuestWorkspace:
+    def create_default_workspace(owner, name: str | None = None) -> GuestWorkspace:
         """
         Create the default GuestWorkspace for a newly registered user.
         Called atomically inside AccountService.register_guest().
@@ -57,12 +57,12 @@ class GuestWorkspaceService:
         Returns:
             Newly created GuestWorkspace instance.
         """
-        if GuestWorkspace.objects.filter(owner=owner).exists():
+        if GuestWorkspace.objects.filter(owner=owner).exists():  # type: ignore
             raise BusinessRuleException("A workspace already exists for this account.")
 
         workspace_name = name or f"{owner.full_name} Finance"
 
-        workspace = GuestWorkspace.objects.create(
+        workspace = GuestWorkspace.objects.create(  # type: ignore
             owner=owner,
             name=workspace_name,
             mobile_number=owner.mobile_number,
@@ -83,10 +83,10 @@ class GuestWorkspaceService:
             WorkspaceSuspendedException if suspended.
         """
         try:
-            workspace = GuestWorkspace.objects.select_related(
+            workspace = GuestWorkspace.objects.select_related(  # type: ignore
                 "owner", "business_category"
             ).get(owner=user)
-        except GuestWorkspace.DoesNotExist:
+        except GuestWorkspace.DoesNotExist:  # type: ignore
             raise WorkspaceNotFoundException()
 
         if workspace.status == WorkspaceStatus.SUSPENDED:
@@ -127,7 +127,7 @@ class GuestWorkspaceService:
         if max_customers is None:
             return  # Unlimited
 
-        current_count = workspace.customers.filter(
+        current_count = getattr(workspace, "customers").filter(  # type: ignore
             status__in=["active", "defaulted"]
         ).count()
 
@@ -149,7 +149,7 @@ class GuestWorkspaceService:
             PlanLimitExceededException if weekly day limit is reached.
         """
         from apps.common.utils import get_week_date_range
-        from apps.guest_workspace.models import CollectionEntry
+        from apps.guest_workspace.models import CollectionEntry  # type: ignore
         import datetime
 
         limits = GuestWorkspaceService.get_effective_limits(workspace)
@@ -159,7 +159,8 @@ class GuestWorkspaceService:
             return  # Unlimited 7 days
 
         # Check if the weekday of collection_date is in workspace.allowed_collection_days
-        allowed_days = [d.lower() for d in (workspace.allowed_collection_days or [])]
+        raw_allowed = getattr(workspace, "allowed_collection_days", []) or []
+        allowed_days = [d.lower() for d in raw_allowed] if isinstance(raw_allowed, (list, tuple)) else []
         if allowed_days:
             c_date_obj = collection_date
             if isinstance(c_date_obj, str):
@@ -175,7 +176,7 @@ class GuestWorkspaceService:
 
         # Count distinct collection days in the current ISO week
         distinct_days = (
-            CollectionEntry.objects.filter(
+            CollectionEntry.objects.filter(  # type: ignore
                 workspace=workspace,
                 collection_date__gte=week_start,
                 collection_date__lte=week_end,
@@ -186,7 +187,7 @@ class GuestWorkspaceService:
         )
 
         # If today's date is already one of the existing days, allow it
-        existing_today = CollectionEntry.objects.filter(
+        existing_today = CollectionEntry.objects.filter(  # type: ignore
             workspace=workspace,
             collection_date=collection_date,
         ).exists()
@@ -219,7 +220,6 @@ class GuestWorkspaceService:
             "allowed_collection_days",
         ]
 
-        old_days = workspace.allowed_collection_days or []
         new_days = validated_data.get("allowed_collection_days")
 
         for field in allowed_fields:
@@ -229,9 +229,9 @@ class GuestWorkspaceService:
 
         # Auto-remap active borrowers if operating collection days were updated
         if new_days is not None and isinstance(new_days, list) and len(new_days) > 0:
-            from apps.guest_workspace.models import CustomerProfile
+            from apps.guest_workspace.models import CustomerProfile  # type: ignore
             primary_new_day = new_days[0].lower()
-            updated_count = CustomerProfile.objects.filter(workspace=workspace).exclude(
+            updated_count = CustomerProfile.objects.filter(workspace=workspace).exclude(  # type: ignore
                 collection_day__in=[d.lower() for d in new_days]
             ).update(collection_day=primary_new_day)
             

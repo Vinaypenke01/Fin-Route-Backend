@@ -8,7 +8,7 @@ LineService manages Collection Lines (Business Routes) and Day Portions:
 """
 
 import logging
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from django.db import transaction
 from django.db.models import QuerySet
 
@@ -35,7 +35,7 @@ class LineService:
         Fetch active collection lines with pre-fetched day schedules for a workspace.
         """
         return (
-            CollectionLine.objects.filter(workspace=workspace, is_active=True)
+            CollectionLine.objects.filter(workspace=workspace, is_active=True)  # type: ignore
             .prefetch_related("day_schedules")
             .order_by("created_at")
         )
@@ -46,10 +46,10 @@ class LineService:
         Fetch a single collection line by public_id.
         """
         try:
-            return CollectionLine.objects.prefetch_related("day_schedules").get(
+            return CollectionLine.objects.prefetch_related("day_schedules").get(  # type: ignore
                 workspace=workspace, public_id=line_public_id, is_active=True
             )
-        except CollectionLine.DoesNotExist:
+        except CollectionLine.DoesNotExist:  # type: ignore
             raise BusinessRuleException("Collection line not found.")
 
     @staticmethod
@@ -57,7 +57,7 @@ class LineService:
         workspace: GuestWorkspace,
         day_of_week: str,
         requested_portion: str,
-        exclude_line_id: int = None,
+        exclude_line_id: Optional[int] = None,
     ) -> bool:
         """
         Validates that (day_of_week, requested_portion) is available and not taken by another Line.
@@ -66,7 +66,7 @@ class LineService:
         - If existing line uses 'morning', another line can only book 'afternoon'.
         - If existing line uses 'afternoon', another line can only book 'morning'.
         """
-        schedules = LineDaySchedule.objects.filter(
+        schedules = LineDaySchedule.objects.filter(  # type: ignore
             line__workspace=workspace,
             line__is_active=True,
             day_of_week=day_of_week.lower(),
@@ -84,7 +84,7 @@ class LineService:
         return True
 
     @staticmethod
-    def get_available_day_portions(workspace: GuestWorkspace, exclude_line_id: int = None) -> Dict[str, List[str]]:
+    def get_available_day_portions(workspace: GuestWorkspace, exclude_line_id: Optional[int] = None) -> Dict[str, List[str]]:
         """
         Returns available portions for each weekday (monday..sunday) in the workspace.
         """
@@ -104,29 +104,36 @@ class LineService:
     @staticmethod
     def validate_workspace_plan_limits(
         workspace: GuestWorkspace,
-        new_or_updated_schedules: List[Dict[str, str]],
-        exclude_line_id: int = None,
+        new_or_updated_schedules: Optional[List[Dict[str, str]]],
+        exclude_line_id: Optional[int] = None,
     ) -> None:
         """
-        Validates line creation against workspace subscription plan limits.
+        Validates line creation and weekday schedules against workspace subscription plan limits.
         Rules:
-        - Free Plan: Up to 3 active route lines max.
-        - Premium Plan: Unlimited active route lines.
+        - Free Plan: Up to max_allowed_collection_days (default 2 days / 4 sessions max).
+        - Premium / Upgraded Plan: Unlimited collection days (all 7 days) and unlimited route lines.
         """
-        if getattr(workspace, "subscription_plan", "free") == "free":
-            max_allowed_lines = getattr(workspace, "max_allowed_collection_days", 2) or 2
-            existing_lines_qs = CollectionLine.objects.filter(
-                workspace=workspace,
-                is_active=True,
+        sub_plan = (getattr(workspace, "subscription_plan", "free") or "free").lower()
+        if sub_plan in ["free", "guest"]:
+            max_allowed_days = getattr(workspace, "max_allowed_collection_days", 2) or 2
+            
+            # Fetch existing active day schedules across all other lines
+            existing_schedules_qs = LineDaySchedule.objects.filter(  # type: ignore
+                line__workspace=workspace,
+                line__is_active=True,
             )
             if exclude_line_id:
-                existing_lines_qs = existing_lines_qs.exclude(id=exclude_line_id)
+                existing_schedules_qs = existing_schedules_qs.exclude(line_id=exclude_line_id)
 
-            # Check if user is creating a NEW line beyond configured line quota (e.g. 2 or 3 lines)
-            if not exclude_line_id and existing_lines_qs.count() >= max_allowed_lines:
+            existing_days = set(existing_schedules_qs.values_list("day_of_week", flat=True))
+            new_days = {s.get("day_of_week", "").lower() for s in (new_or_updated_schedules or []) if s.get("day_of_week")}
+            
+            combined_days = existing_days.union(new_days)
+
+            if len(combined_days) > max_allowed_days:
                 raise BusinessRuleException(
-                    f"Your Free Plan permits operating on a maximum of {max_allowed_lines} Route Lines. "
-                    f"Please upgrade your plan to unlock more route lines!"
+                    f"Your FREE plan permits operating on a maximum of {max_allowed_days} collection days per week "
+                    f"({len(combined_days)} requested). Please upgrade your plan to unlock all 7 collection days and unlimited route lines!"
                 )
 
     @staticmethod
@@ -135,7 +142,7 @@ class LineService:
         workspace: GuestWorkspace,
         name: str,
         area: str = "",
-        schedules: List[Dict[str, str]] = None,
+        schedules: Optional[List[Dict[str, str]]] = None,
         created_by=None,
     ) -> CollectionLine:
         """
@@ -151,14 +158,14 @@ class LineService:
 
         # Validate capacity for each requested schedule against existing lines
         for sched in schedules:
-            day = sched.get("day_of_week", "").lower()
-            portion = sched.get("portion", DayPortionChoices.BOTH).lower()
+            day = (sched.get("day_of_week") or "").lower()
+            portion = (sched.get("portion") or DayPortionChoices.BOTH).lower()
             if not LineService.validate_portion_availability(workspace, day, portion):
                 raise BusinessRuleException(
                     f"The {portion.upper()} portion of {day.capitalize()} is already booked by another line."
                 )
 
-        line = CollectionLine.objects.create(
+        line = CollectionLine.objects.create(  # type: ignore
             workspace=workspace,
             name=name.strip(),
             area=area.strip(),
@@ -166,9 +173,9 @@ class LineService:
         )
 
         for sched in schedules:
-            day = sched.get("day_of_week", "").lower()
-            portion = sched.get("portion", DayPortionChoices.BOTH).lower()
-            LineDaySchedule.objects.create(
+            day = (sched.get("day_of_week") or "").lower()
+            portion = (sched.get("portion") or DayPortionChoices.BOTH).lower()
+            LineDaySchedule.objects.create(  # type: ignore
                 line=line,
                 day_of_week=day,
                 portion=portion,
@@ -184,7 +191,7 @@ class LineService:
         Auto-syncs workspace.allowed_collection_days based on active collection lines.
         """
         days = list(
-            LineDaySchedule.objects.filter(line__workspace=workspace, line__is_active=True)
+            LineDaySchedule.objects.filter(line__workspace=workspace, line__is_active=True)  # type: ignore
             .values_list("day_of_week", flat=True)
             .distinct()
         )
@@ -197,9 +204,9 @@ class LineService:
     def update_line(
         workspace: GuestWorkspace,
         line_public_id: str,
-        name: str = None,
-        area: str = None,
-        schedules: List[Dict[str, str]] = None,
+        name: Optional[str] = None,
+        area: Optional[str] = None,
+        schedules: Optional[List[Dict[str, str]]] = None,
     ) -> CollectionLine:
         """
         Update an existing Collection Line.
@@ -218,19 +225,19 @@ class LineService:
 
             # Validate capacity excluding current line
             for sched in schedules:
-                day = sched.get("day_of_week", "").lower()
-                portion = sched.get("portion", DayPortionChoices.BOTH).lower()
+                day = (sched.get("day_of_week") or "").lower()
+                portion = (sched.get("portion") or DayPortionChoices.BOTH).lower()
                 if not LineService.validate_portion_availability(workspace, day, portion, exclude_line_id=line.id):
                     raise BusinessRuleException(
                         f"The {portion.upper()} portion of {day.capitalize()} is already booked by another line."
                     )
 
             # Re-create schedules
-            line.day_schedules.all().delete()
+            line.day_schedules.all().delete()  # type: ignore
             for sched in schedules:
-                day = sched.get("day_of_week", "").lower()
-                portion = sched.get("portion", DayPortionChoices.BOTH).lower()
-                LineDaySchedule.objects.create(
+                day = (sched.get("day_of_week") or "").lower()
+                portion = (sched.get("portion") or DayPortionChoices.BOTH).lower()
+                LineDaySchedule.objects.create(  # type: ignore
                     line=line,
                     day_of_week=day,
                     portion=portion,
@@ -245,7 +252,7 @@ class LineService:
         workspace: GuestWorkspace,
         line_public_id: str,
         mode: str = "unassign",
-        target_line_public_id: str = None,
+        target_line_public_id: Optional[str] = None,
     ) -> None:
         """
         Deactivate / delete a line.
@@ -258,14 +265,14 @@ class LineService:
 
         if mode == "reassign" and target_line_public_id:
             try:
-                target_line = CollectionLine.objects.get(workspace=workspace, public_id=target_line_public_id, is_active=True)
-                CustomerProfile.objects.filter(workspace=workspace, line=line).update(line=target_line)
-            except CollectionLine.DoesNotExist:
+                target_line = CollectionLine.objects.get(workspace=workspace, public_id=target_line_public_id, is_active=True)  # type: ignore
+                CustomerProfile.objects.filter(workspace=workspace, line=line).update(line=target_line)  # type: ignore
+            except CollectionLine.DoesNotExist:  # type: ignore
                 raise BusinessRuleException("Target route line for reassignment not found.")
         elif mode == "delete_customers":
             # Hard delete customers linked to this line as well as any unassigned customers & their CASCADE collection entries
-            CustomerProfile.objects.filter(workspace=workspace, line=line).delete()
-            CustomerProfile.objects.filter(workspace=workspace, line__isnull=True).delete()
+            CustomerProfile.objects.filter(workspace=workspace, line=line).delete()  # type: ignore
+            CustomerProfile.objects.filter(workspace=workspace, line__isnull=True).delete()  # type: ignore
 
         line.is_active = False
         line.save()
@@ -280,12 +287,12 @@ class LineService:
         Ensures existing production workspaces have at least one Line ("Main Line").
         Maps existing workspace.allowed_collection_days and existing CustomerProfile entries to this Line.
         """
-        existing_line = CollectionLine.objects.filter(workspace=workspace, is_active=True).first()
+        existing_line = CollectionLine.objects.filter(workspace=workspace, is_active=True).first()  # type: ignore
         if existing_line:
             return existing_line
 
         line_name = f"{workspace.name} — Main Line" if workspace.name else "Main Line"
-        default_line = CollectionLine.objects.create(
+        default_line = CollectionLine.objects.create(  # type: ignore
             workspace=workspace,
             name=line_name,
             area=workspace.city or "Main Route",
@@ -294,14 +301,14 @@ class LineService:
 
         saved_days = workspace.allowed_collection_days or ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
         for day in saved_days:
-            LineDaySchedule.objects.create(
+            LineDaySchedule.objects.create(  # type: ignore
                 line=default_line,
-                day_of_week=day.lower(),
+                day_of_week=str(day).lower(),
                 portion=DayPortionChoices.BOTH,
             )
 
         # Map unassigned existing customer profiles to this Default Line
-        CustomerProfile.objects.filter(workspace=workspace, line__isnull=True).update(
+        CustomerProfile.objects.filter(workspace=workspace, line__isnull=True).update(  # type: ignore
             line=default_line,
             portion=DayPortionChoices.BOTH,
         )

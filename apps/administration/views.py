@@ -670,7 +670,14 @@ class AdminUpgradeRequestDetailView(APIView):
             req_obj.save()
 
             if new_status == "approved":
+                from django.utils import timezone
+                from datetime import timedelta
+                
                 workspace = req_obj.workspace
+                today = timezone.now().date()
+                workspace.subscription_start_date = today
+                workspace.subscription_end_date = today + timedelta(days=30)
+                
                 if req_obj.plan_code == "full_module_unlock" or req_obj.additional_days == 0:
                     workspace.subscription_plan = "premium"
                 else:
