@@ -9,8 +9,8 @@ LineService manages Collection Lines (Business Routes) and Day Portions:
 
 import logging
 from typing import List, Dict, Any, Optional
-from django.db import transaction
-from django.db.models import QuerySet
+from django.db import transaction  # type: ignore
+from django.db.models import QuerySet  # type: ignore
 
 from apps.common.exceptions import BusinessRuleException
 from apps.guest_workspace.models import (
@@ -108,33 +108,39 @@ class LineService:
         exclude_line_id: Optional[int] = None,
     ) -> None:
         """
-        Validates line creation and weekday schedules against workspace subscription plan limits.
-        Rules:
-        - Free Plan: Up to max_allowed_collection_days (default 2 days / 4 sessions max).
-        - Premium / Upgraded Plan: Unlimited collection days (all 7 days) and unlimited route lines.
+        Validates line creation and weekday schedules against the 14 weekly time-slots capacity limit.
+        Rule:
+        - Workspaces can create unlimited route lines up to a maximum of 14 operating time-slots per week
+          (7 days x 2 shifts: Morning 1:00 AM – 1:00 PM and Afternoon/Evening 1:00 PM – 12:00 AM).
         """
-        sub_plan = (getattr(workspace, "subscription_plan", "free") or "free").lower()
-        if sub_plan in ["free", "guest"]:
-            max_allowed_days = getattr(workspace, "max_allowed_collection_days", 2) or 2
-            
-            # Fetch existing active day schedules across all other lines
-            existing_schedules_qs = LineDaySchedule.objects.filter(  # type: ignore
-                line__workspace=workspace,
-                line__is_active=True,
+        # Fetch existing active day schedules across all other lines
+        existing_schedules_qs = LineDaySchedule.objects.filter(  # type: ignore
+            line__workspace=workspace,
+            line__is_active=True,
+        )
+        if exclude_line_id:
+            existing_schedules_qs = existing_schedules_qs.exclude(line_id=exclude_line_id)
+
+        # Count total existing slots (morning=1, afternoon=1, both=2)
+        existing_slots = 0
+        for sched in existing_schedules_qs:
+            portion = (sched.portion or "both").lower()
+            existing_slots += 2 if portion in ["both", "full_day"] else 1
+
+        # Count new/updated slots requested for current line
+        new_slots = 0
+        for sched in (new_or_updated_schedules or []):
+            portion = (sched.get("portion") or "both").lower()
+            new_slots += 2 if portion in ["both", "full_day"] else 1
+
+        total_slots = existing_slots + new_slots
+
+        if total_slots > 14:
+            raise BusinessRuleException(
+                f"Maximum weekly operating capacity reached ({total_slots}/14 slots requested). "
+                f"A week has 7 days with 2 shifts per day (14 total slots). "
+                f"Please unassign or edit a session on another line to add this schedule."
             )
-            if exclude_line_id:
-                existing_schedules_qs = existing_schedules_qs.exclude(line_id=exclude_line_id)
-
-            existing_days = set(existing_schedules_qs.values_list("day_of_week", flat=True))
-            new_days = {s.get("day_of_week", "").lower() for s in (new_or_updated_schedules or []) if s.get("day_of_week")}
-            
-            combined_days = existing_days.union(new_days)
-
-            if len(combined_days) > max_allowed_days:
-                raise BusinessRuleException(
-                    f"Your FREE plan permits operating on a maximum of {max_allowed_days} collection days per week "
-                    f"({len(combined_days)} requested). Please upgrade your plan to unlock all 7 collection days and unlimited route lines!"
-                )
 
     @staticmethod
     @transaction.atomic
@@ -196,7 +202,7 @@ class LineService:
             .distinct()
         )
         if days:
-            workspace.allowed_collection_days = days
+            workspace.allowed_collection_days = days  # type: ignore
             workspace.save(update_fields=["allowed_collection_days"])
 
     @staticmethod
@@ -214,20 +220,21 @@ class LineService:
         line = LineService.get_line_detail(workspace, line_public_id)
 
         if name is not None:
-            line.name = name.strip()
+            line.name = str(name).strip()  # type: ignore
         if area is not None:
-            line.area = area.strip()
+            line.area = str(area).strip()  # type: ignore
         line.save()
 
         if schedules is not None:
+            line_id = getattr(line, "id", None) or getattr(line, "pk", None)
             # Validate workspace subscription plan limits excluding current line
-            LineService.validate_workspace_plan_limits(workspace, schedules, exclude_line_id=line.id)
+            LineService.validate_workspace_plan_limits(workspace, schedules, exclude_line_id=line_id)
 
             # Validate capacity excluding current line
             for sched in schedules:
                 day = (sched.get("day_of_week") or "").lower()
                 portion = (sched.get("portion") or DayPortionChoices.BOTH).lower()
-                if not LineService.validate_portion_availability(workspace, day, portion, exclude_line_id=line.id):
+                if not LineService.validate_portion_availability(workspace, day, portion, exclude_line_id=line_id):
                     raise BusinessRuleException(
                         f"The {portion.upper()} portion of {day.capitalize()} is already booked by another line."
                     )
@@ -274,7 +281,7 @@ class LineService:
             CustomerProfile.objects.filter(workspace=workspace, line=line).delete()  # type: ignore
             CustomerProfile.objects.filter(workspace=workspace, line__isnull=True).delete()  # type: ignore
 
-        line.is_active = False
+        line.is_active = False  # type: ignore
         line.save()
         logger.info("Deactivated CollectionLine '%s' (ID: %s, mode: %s)", line.name, line.public_id, mode)
         LineService.sync_workspace_allowed_days(workspace)
@@ -300,7 +307,7 @@ class LineService:
         )
 
         saved_days = workspace.allowed_collection_days or ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
-        for day in saved_days:
+        for day in list(saved_days):  # type: ignore
             LineDaySchedule.objects.create(  # type: ignore
                 line=default_line,
                 day_of_week=str(day).lower(),

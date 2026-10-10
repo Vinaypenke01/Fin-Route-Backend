@@ -140,66 +140,10 @@ class GuestWorkspaceService:
     @staticmethod
     def check_collection_day_quota(workspace: GuestWorkspace, collection_date) -> None:
         """
-        Check if a new collection can be recorded on the given date
-        without exceeding the weekly collection day limit.
-
-        The "week" is ISO week (Monday to Sunday).
-
-        Raises:
-            PlanLimitExceededException if weekly day limit is reached.
+        Check if a collection can be recorded on the given date.
+        With 14 weekly slots across 7 operating days, any active line operating day is permitted.
         """
-        from apps.common.utils import get_week_date_range
-        from apps.guest_workspace.models import CollectionEntry  # type: ignore
-        import datetime
-
-        limits = GuestWorkspaceService.get_effective_limits(workspace)
-        max_days = limits["max_collection_days_per_week"] or 1
-
-        if max_days >= 7:
-            return  # Unlimited 7 days
-
-        # Check if the weekday of collection_date is in workspace.allowed_collection_days
-        raw_allowed = getattr(workspace, "allowed_collection_days", []) or []
-        allowed_days = [d.lower() for d in raw_allowed] if isinstance(raw_allowed, (list, tuple)) else []
-        if allowed_days:
-            c_date_obj = collection_date
-            if isinstance(c_date_obj, str):
-                try:
-                    c_date_obj = datetime.datetime.strptime(c_date_obj, "%Y-%m-%d").date()
-                except ValueError:
-                    pass
-            weekday_name = c_date_obj.strftime("%A").lower() if hasattr(c_date_obj, "strftime") else ""
-            if weekday_name in allowed_days:
-                return  # Configured operating day for this workspace!
-
-        week_start, week_end = get_week_date_range(collection_date)
-
-        # Count distinct collection days in the current ISO week
-        distinct_days = (
-            CollectionEntry.objects.filter(  # type: ignore
-                workspace=workspace,
-                collection_date__gte=week_start,
-                collection_date__lte=week_end,
-            )
-            .values("collection_date")
-            .distinct()
-            .count()
-        )
-
-        # If today's date is already one of the existing days, allow it
-        existing_today = CollectionEntry.objects.filter(  # type: ignore
-            workspace=workspace,
-            collection_date=collection_date,
-        ).exists()
-
-        if not existing_today and distinct_days >= max_days:
-            raise PlanLimitExceededException(
-                detail=f"You have reached your limit of {max_days} collection business day(s) per week. Upgrade your plan to purchase additional collection days.",
-                usage={
-                    "collection_days_this_week": distinct_days,
-                    "limit": max_days,
-                },
-            )
+        return  # Permitted for all operating lines up to 14 weekly slots
 
     @staticmethod
     @transaction.atomic
