@@ -3,7 +3,7 @@ guest_workspace/urls.py — URL routing for Guest Workspace app shell.
 Mounted at: /api/v1/app/
 """
 
-from django.urls import path
+from django.urls import path  # type: ignore
 from apps.guest_workspace.views import (
     WorkspaceDetailView,
     DashboardView,
@@ -35,9 +35,13 @@ from apps.guest_workspace.views import (
     MigrationCutoverView,
     ExistingBorrowerBulkImportView,
     HistoricalAdjustmentView,
+    RouteSettlementSyncView,
 )
 
 urlpatterns = [
+    # Route Settlements Multi-Device Sync
+    path("route-settlements/", RouteSettlementSyncView.as_view(), name="app-route-settlements-sync"),
+
     # Digital Migration & Onboarding Suite
     path("onboarding/cutover/", MigrationCutoverView.as_view(), name="app-onboarding-cutover"),
     path("onboarding/bulk-borrowers/", ExistingBorrowerBulkImportView.as_view(), name="app-onboarding-bulk-borrowers"),

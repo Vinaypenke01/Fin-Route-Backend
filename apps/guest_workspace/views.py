@@ -14,14 +14,21 @@ API Views for Guest Workspace:
 import logging
 import os
 from datetime import datetime, date as dt_date
-from django.db.models import Sum, Count, Q
+from django.db.models import Sum, Count, Q  # type: ignore
 from rest_framework.views import APIView
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework import status
 from rest_framework.response import Response
-from django.http import HttpResponse
+from django.http import HttpResponse  # type: ignore
 from drf_spectacular.utils import extend_schema
-from apps.guest_workspace.models import CollectionEntry, CustomerProfile, CapitalEntry, Expense
+from apps.guest_workspace.models import (
+    CollectionEntry,
+    CustomerProfile,
+    CapitalEntry,
+    Expense,
+    GuestWorkspace,
+    CollectionLine,
+)
 
 from apps.common.permissions import IsGuestUser
 from apps.common.responses import success_response, created_response, error_response
@@ -212,7 +219,7 @@ class CustomerCollectionsView(APIView):
     def get(self, request, public_id):
         workspace = GuestWorkspaceService.get_workspace(request.user)
         customer = CustomerService.get_customer_detail(workspace, public_id)
-        collections = customer.collections.select_related("status", "payment_mode").order_by("-collection_date")
+        collections = customer.collections.select_related("status", "payment_mode").order_by("-collection_date")  # type: ignore
         
         serializer = CollectionListSerializer(collections, many=True)
         return success_response(data=serializer.data)
@@ -486,7 +493,7 @@ class UpgradeView(APIView):
         workspace = GuestWorkspaceService.get_workspace(request.user)
         limits = GuestWorkspaceService.get_effective_limits(workspace)
 
-        db_plans = list(SubscriptionPlanConfig.objects.filter(is_active=True).order_by("sort_order", "monthly_price"))
+        db_plans = list(SubscriptionPlanConfig.objects.filter(is_active=True).order_by("sort_order", "monthly_price"))  # type: ignore
         
         guest_plans = []
         lender_plans = []
@@ -617,7 +624,7 @@ class UpgradeView(APIView):
         additional_days = request.data.get("additional_days")
 
         if plan_code:
-            config = SubscriptionPlanConfig.objects.filter(plan_code=plan_code).first()
+            config = SubscriptionPlanConfig.objects.filter(plan_code=plan_code).first()  # type: ignore
             if config:
                 additional_days = config.additional_days
 
@@ -625,14 +632,14 @@ class UpgradeView(APIView):
             return error_response("Please specify plan_code or additional_days.", http_status=400)
 
         add_days = int(additional_days)
-        workspace.purchased_additional_days = add_days
+        workspace.purchased_additional_days = add_days  # type: ignore
         if add_days > 0:
-            workspace.subscription_plan = "premium"
+            workspace.subscription_plan = "premium"  # type: ignore
         else:
-            workspace.subscription_plan = "free"
-            workspace.purchased_additional_days = 0
-            workspace.max_collection_days_override = None
-            workspace.allowed_collection_days = ["monday"]
+            workspace.subscription_plan = "free"  # type: ignore
+            workspace.purchased_additional_days = 0  # type: ignore
+            workspace.max_collection_days_override = None  # type: ignore
+            workspace.allowed_collection_days = ["monday"]  # type: ignore
         workspace.save()
 
         updated_limits = GuestWorkspaceService.get_effective_limits(workspace)
@@ -667,13 +674,13 @@ class SubmitUpgradeRequestView(APIView):
         amount = request.data.get("amount", 0)
 
         if plan_code:
-            config = SubscriptionPlanConfig.objects.filter(plan_code=plan_code).first()
+            config = SubscriptionPlanConfig.objects.filter(plan_code=plan_code).first()  # type: ignore
             if config:
                 plan_name = config.name
                 additional_days = config.additional_days
                 amount = config.monthly_price
 
-        req_obj = PlanUpgradeRequest.objects.create(
+        req_obj = PlanUpgradeRequest.objects.create(  # type: ignore
             workspace=workspace,
             requested_by=request.user,
             plan_code=plan_code or "guest_custom",
@@ -699,28 +706,28 @@ class WorkspaceDataBackupView(APIView):
 
     def get(self, request):
         import json
-        from django.utils import timezone
+        from django.utils import timezone  # type: ignore
         from apps.guest_workspace.models import CustomerProfile, CollectionEntry, Expense
-        from apps.guest_workspace.serializers import CustomerProfileSerializer, CollectionEntrySerializer, ExpenseSerializer, GuestWorkspaceSerializer
+        from apps.guest_workspace.serializers import CustomerProfileListSerializer, CollectionListSerializer, ExpenseListSerializer, GuestWorkspaceSerializer
         from apps.audit_logs.services import AuditLogService
         from apps.audit_logs.models import ActionType
 
         workspace = GuestWorkspaceService.get_workspace(request.user)
 
-        customers = CustomerProfile.objects.filter(workspace=workspace)
-        collections = CollectionEntry.objects.filter(workspace=workspace)
-        expenses = Expense.objects.filter(workspace=workspace)
+        customers = CustomerProfile.objects.filter(workspace=workspace)  # type: ignore
+        collections = CollectionEntry.objects.filter(workspace=workspace)  # type: ignore
+        expenses = Expense.objects.filter(workspace=workspace)  # type: ignore
 
         backup_payload = {
             "version": "1.0",
             "backup_timestamp": timezone.now().isoformat(),
             "workspace": GuestWorkspaceSerializer(workspace).data,
             "customers_count": customers.count(),
-            "customers": CustomerProfileSerializer(customers, many=True).data,
+            "customers": CustomerProfileListSerializer(customers, many=True).data,
             "collections_count": collections.count(),
-            "collections": CollectionEntrySerializer(collections, many=True).data,
+            "collections": CollectionListSerializer(collections, many=True).data,
             "expenses_count": expenses.count(),
-            "expenses": ExpenseSerializer(expenses, many=True).data,
+            "expenses": ExpenseListSerializer(expenses, many=True).data,
         }
 
         AuditLogService.log_action(
@@ -732,7 +739,7 @@ class WorkspaceDataBackupView(APIView):
         )
 
         response = HttpResponse(json.dumps(backup_payload, indent=2), content_type="application/json")
-        response["Content-Disposition"] = f'attachment; filename="finroute_backup_{workspace.id}_{timezone.now().strftime("%Y%m%d_%H%M%S")}.json"'
+        response["Content-Disposition"] = f'attachment; filename="finroute_backup_{getattr(workspace, "id", "")}_{timezone.now().strftime("%Y%m%d_%H%M%S")}.json"'
         return response
 
 
@@ -757,7 +764,7 @@ class CapitalEntryView(APIView):
             except ValueError:
                 pass
 
-        entries = CapitalService.get_capital_entries(workspace, entry_date=entry_date)
+        entries = CapitalService.get_capital_entries(workspace, entry_date=entry_date)  # type: ignore
         serializer = CapitalEntrySerializer(entries, many=True)
         return success_response(data=serializer.data)
 
@@ -804,7 +811,7 @@ class DailyCashReconciliationView(APIView):
     def get(self, request):
         try:
             from datetime import date as dt_date, datetime
-            from django.db.models import Sum, Count, Q
+            from django.db.models import Sum, Count, Q  # type: ignore
             from apps.guest_workspace.models import CustomerProfile, CollectionEntry, Expense, CapitalEntry
 
             workspace = GuestWorkspaceService.get_workspace(request.user)
@@ -833,7 +840,7 @@ class DailyCashReconciliationView(APIView):
             target_date = start_date_val
 
             # 1. Collections Inflow
-            collections_qs = CollectionEntry.objects.filter(
+            collections_qs = CollectionEntry.objects.filter(  # type: ignore
                 workspace=workspace,
                 collection_date__gte=start_date_val,
                 collection_date__lte=end_date_val,
@@ -847,7 +854,7 @@ class DailyCashReconciliationView(APIView):
             )
 
             # 2. Capital Injections Inflow
-            capital_agg = CapitalEntry.objects.filter(
+            capital_agg = CapitalEntry.objects.filter(  # type: ignore
                 workspace=workspace,
                 entry_date__gte=start_date_val,
                 entry_date__lte=end_date_val,
@@ -857,7 +864,7 @@ class DailyCashReconciliationView(APIView):
             )
 
             # 3. Disbursements Outflow
-            disbursements_qs = CustomerProfile.objects.filter(
+            disbursements_qs = CustomerProfile.objects.filter(  # type: ignore
                 workspace=workspace,
                 start_date__gte=start_date_val,
                 start_date__lte=end_date_val,
@@ -871,7 +878,7 @@ class DailyCashReconciliationView(APIView):
             )
 
             # 4. Expenses Outflow
-            expenses_qs = Expense.objects.filter(
+            expenses_qs = Expense.objects.filter(  # type: ignore
                 workspace=workspace,
                 expense_date__gte=start_date_val,
                 expense_date__lte=end_date_val,
@@ -886,20 +893,20 @@ class DailyCashReconciliationView(APIView):
             expenses_total = float(expenses_agg["total"] or 0)
 
             # 5. Historical Opening Cash (Carried Forward from Before start_date_val)
-            hist_cols_qs = CollectionEntry.objects.filter(workspace=workspace, collection_date__lt=start_date_val)
+            hist_cols_qs = CollectionEntry.objects.filter(workspace=workspace, collection_date__lt=start_date_val)  # type: ignore
             if line_param and line_param != "all":
                 hist_cols_qs = hist_cols_qs.filter(customer__line__public_id=line_param)
             hist_cols_tot = float(hist_cols_qs.aggregate(total=Sum("collected_amount"))["total"] or 0)
 
-            hist_cap_qs = CapitalEntry.objects.filter(workspace=workspace, entry_date__lt=start_date_val)
+            hist_cap_qs = CapitalEntry.objects.filter(workspace=workspace, entry_date__lt=start_date_val)  # type: ignore
             hist_cap_tot = float(hist_cap_qs.aggregate(total=Sum("amount"))["total"] or 0)
 
-            hist_disb_qs = CustomerProfile.objects.filter(workspace=workspace, start_date__lt=start_date_val)
+            hist_disb_qs = CustomerProfile.objects.filter(workspace=workspace, start_date__lt=start_date_val)  # type: ignore
             if line_param and line_param != "all":
                 hist_disb_qs = hist_disb_qs.filter(Q(line__public_id=line_param) | Q(line__isnull=True))
             hist_disb_tot = float(hist_disb_qs.aggregate(total=Sum("disbursed_amount"))["total"] or 0)
 
-            hist_exp_qs = Expense.objects.filter(workspace=workspace, expense_date__lt=start_date_val)
+            hist_exp_qs = Expense.objects.filter(workspace=workspace, expense_date__lt=start_date_val)  # type: ignore
             hist_exp_tot = float(hist_exp_qs.aggregate(total=Sum("amount"))["total"] or 0)
 
             opening_carried_forward = (hist_cols_tot + hist_cap_tot) - (hist_disb_tot + hist_exp_tot)
@@ -934,7 +941,7 @@ class DailyCashReconciliationView(APIView):
             })
         except Exception as ex:
             logger.exception("DailyCashReconciliationView error: %s", ex)
-            return error_response(message=f"Failed to load daily cash reconciliation: {str(ex)}", status_code=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            return error_response(message=f"Failed to load daily cash reconciliation: {str(ex)}", http_status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 class TriggerDailyRouteEmailsView(APIView):
@@ -947,7 +954,7 @@ class TriggerDailyRouteEmailsView(APIView):
 
     def post(self, request):
         try:
-            from django.conf import settings
+            from django.conf import settings  # type: ignore
             import os
             expected_secret = getattr(settings, 'CRON_SECRET_KEY', 'finroute_cron_secret_2026') or os.environ.get('CRON_SECRET_KEY', 'finroute_cron_secret_2026')
             provided_secret = request.headers.get("X-Cron-Secret") or request.query_params.get("secret")
@@ -975,36 +982,37 @@ class TriggerDailyRouteEmailsView(APIView):
             today_weekday = target_date.strftime("%A").lower()
             from apps.guest_workspace.services.route_email_report_service import RouteEmailReportService
             # Only active Paid Premium workspaces (users with unlocked screens) receive daily report emails
-            workspaces_qs = GuestWorkspace.objects.filter(status="active", subscription_plan="premium")
+            workspaces_qs = GuestWorkspace.objects.filter(status="active", subscription_plan="premium")  # type: ignore
 
             # If user is authenticated, limit to their workspace only
             if request.user and request.user.is_authenticated:
                 try:
                     ws = GuestWorkspaceService.get_workspace(request.user)
-                    workspaces_qs = GuestWorkspace.objects.filter(id=ws.id)
+                    workspaces_qs = GuestWorkspace.objects.filter(pk=getattr(ws, "pk", getattr(ws, "id", None)))  # type: ignore
                 except Exception:
                     pass
 
             sent_results = []
             for ws in workspaces_qs:
-                lines = CollectionLine.objects.filter(workspace=ws, is_active=True).prefetch_related("day_schedules")
+                lines = CollectionLine.objects.filter(workspace=ws, is_active=True).prefetch_related("day_schedules")  # type: ignore
                 matching_lines = []
                 for line in lines:
                     if line.day_schedules.filter(day_of_week__iexact=today_weekday).exists():
                         matching_lines.append(line)
 
                 if not matching_lines:
-                    matching_lines = list(lines) if lines.exists() else [None]
+                    matching_lines = list(lines) if lines.exists() else []
 
                 for line in matching_lines:
                     sent = False
                     error_msg = None
                     try:
-                        sent = RouteEmailReportService.send_route_email(
-                            workspace=ws,
-                            line=line,
-                            target_date=target_date,
-                        )
+                        if line is not None:
+                            sent = RouteEmailReportService.send_route_email(
+                                workspace=ws,
+                                line=line,
+                                target_date=target_date,
+                            )
                     except Exception as ex:
                         logger.error("Error triggering route email for line %s in workspace %s: %s", line, ws.name, ex, exc_info=True)
                         error_msg = str(ex)
@@ -1065,7 +1073,7 @@ class SendRouteClosureReportView(APIView):
                     pass
 
             # 1. Paid Collection Entries
-            collections_qs = CollectionEntry.objects.filter(workspace=workspace, collection_date=target_date).select_related("customer")
+            collections_qs = CollectionEntry.objects.filter(workspace=workspace, collection_date=target_date).select_related("customer")  # type: ignore
             if line_param and line_param != "all":
                 collections_qs = collections_qs.filter(customer__line__public_id=line_param)
 
@@ -1073,7 +1081,7 @@ class SendRouteClosureReportView(APIView):
             skipped_entries = collections_qs.filter(status__code="skipped")
 
             # 2. Query line customers for unpaid borrower breakdown
-            line_customers_qs = CustomerProfile.objects.filter(workspace=workspace).select_related("line")
+            line_customers_qs = CustomerProfile.objects.filter(workspace=workspace).select_related("line")  # type: ignore
             if line_param and line_param != "all":
                 line_customers_qs = line_customers_qs.filter(line__public_id=line_param)
 
@@ -1082,16 +1090,16 @@ class SendRouteClosureReportView(APIView):
             unpaid_customers = line_customers_qs.exclude(id__in=paid_customer_ids | logged_skipped_ids)
 
             # 3. Query Capital
-            capital_agg = CapitalEntry.objects.filter(workspace=workspace, entry_date=target_date).aggregate(total=Sum("amount"), count=Count("id"))
+            capital_agg = CapitalEntry.objects.filter(workspace=workspace, entry_date=target_date).aggregate(total=Sum("amount"), count=Count("id"))  # type: ignore
 
             # 4. Query Disbursements
-            disbursements_qs = CustomerProfile.objects.filter(workspace=workspace, start_date=target_date)
+            disbursements_qs = CustomerProfile.objects.filter(workspace=workspace, start_date=target_date)  # type: ignore
             if line_param and line_param != "all":
                 disbursements_qs = disbursements_qs.filter(line__public_id=line_param)
             disbursements_agg = disbursements_qs.aggregate(total=Sum("disbursed_amount"), count=Count("id"))
 
             # 5. Query Expenses
-            expenses_agg = Expense.objects.filter(workspace=workspace, expense_date=target_date).aggregate(total=Sum("amount"), count=Count("id"))
+            expenses_agg = Expense.objects.filter(workspace=workspace, expense_date=target_date).aggregate(total=Sum("amount"), count=Count("id"))  # type: ignore
 
             col_tot = float(paid_entries.aggregate(total=Sum("collected_amount"))["total"] or 0)
             cap_tot = float(capital_agg["total"] or 0)
@@ -1295,14 +1303,14 @@ class SendRouteClosureReportView(APIView):
             </html>
             """
 
-            from django.conf import settings
-            from django.core.mail import send_mail
+            from django.conf import settings  # type: ignore
+            from django.core.mail import send_mail  # type: ignore
 
             email_sent = False
             resend_key = getattr(settings, 'RESEND_API_KEY', '') or os.environ.get('RESEND_API_KEY', '')
             if resend_key:
                 try:
-                    import resend
+                    import resend  # type: ignore
                     resend.api_key = resend_key
                     resend.Emails.send({
                         "from": "FinRoute Reports <info@fin-route.site>",
@@ -1337,7 +1345,7 @@ class SendRouteClosureReportView(APIView):
             })
         except Exception as ex:
             logger.exception("SendRouteClosureReportView failed: %s", ex)
-            return error_response(message=f"Failed to generate route closure report: {str(ex)}", status_code=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            return error_response(message=f"Failed to generate route closure report: {str(ex)}", http_status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 # ─── Collection Line Views ───────────────────────────────────────────────────
@@ -1531,6 +1539,115 @@ class HistoricalAdjustmentView(APIView):
                 "remarks": getattr(entry, "remarks", getattr(entry, "description", "")),
             },
             message="Historical adjustment recorded successfully.",
+        )
+
+
+class RouteSettlementSyncView(APIView):
+    """
+    GET  /api/v1/app/route-settlements/ — Retrieve all persisted route settlements and active route statuses across all devices.
+    POST /api/v1/app/route-settlements/ — Persist and sync route settlements and active route statuses for the workspace across devices.
+    """
+    permission_classes = [IsAuthenticated, IsGuestUser]
+
+    def get(self, request):
+        from apps.audit_logs.models import AuditLog  # type: ignore
+        user = request.user
+
+        # 1. Fetch all route settlements
+        settlement_logs = AuditLog.objects.filter(  # type: ignore
+            user=user,
+            target_model="RouteSettlement",
+        ).order_by("created_at")
+
+        settlements_map = {}
+        for log in settlement_logs:
+            if log.target_id and isinstance(log.changes, dict):
+                settlements_map[log.target_id] = log.changes
+
+        # 2. Fetch all active routes
+        active_route_logs = AuditLog.objects.filter(  # type: ignore
+            user=user,
+            target_model="ActiveRoute",
+        ).order_by("created_at")
+
+        active_routes_map = {}
+        for log in active_route_logs:
+            if log.target_id and isinstance(log.changes, dict):
+                if log.changes.get("isStarted"):
+                    active_routes_map[log.target_id] = log.changes
+
+        return success_response(data={
+            "settlements": settlements_map,
+            "active_routes": active_routes_map,
+        })
+
+    def post(self, request):
+        from apps.audit_logs.models import AuditLog  # type: ignore
+        user = request.user
+        data = request.data or {}
+
+        incoming_settlements = data.get("settlements") or {}
+        incoming_active_routes = data.get("active_routes") or {}
+
+        # 1. Sync settlements
+        if isinstance(incoming_settlements, dict):
+            for target_key, analytics in incoming_settlements.items():
+                if target_key and isinstance(analytics, dict):
+                    AuditLog.objects.update_or_create(  # type: ignore
+                        user=user,
+                        target_model="RouteSettlement",
+                        target_id=str(target_key),
+                        defaults={
+                            "action": "update",
+                            "description": f"Route settlement for {target_key}",
+                            "changes": analytics,
+                        },
+                    )
+
+        # 2. Sync active routes
+        if isinstance(incoming_active_routes, dict):
+            for target_key, state in incoming_active_routes.items():
+                if target_key and isinstance(state, dict):
+                    if state.get("isStarted"):
+                        AuditLog.objects.update_or_create(  # type: ignore
+                            user=user,
+                            target_model="ActiveRoute",
+                            target_id=str(target_key),
+                            defaults={
+                                "action": "update",
+                                "description": f"Active route session {target_key}",
+                                "changes": state,
+                            },
+                        )
+                    else:
+                        AuditLog.objects.filter(  # type: ignore
+                            user=user,
+                            target_model="ActiveRoute",
+                            target_id=str(target_key),
+                        ).delete()
+
+        # Delete any active routes that were marked as stopped
+        cleared_keys = data.get("cleared_active_keys") or []
+        if isinstance(cleared_keys, list) and cleared_keys:
+            AuditLog.objects.filter(  # type: ignore
+                user=user,
+                target_model="ActiveRoute",
+                target_id__in=[str(k) for k in cleared_keys],
+            ).delete()
+
+        # Return updated maps
+        settlement_logs = AuditLog.objects.filter(user=user, target_model="RouteSettlement").order_by("created_at")  # type: ignore
+        settlements_map = {log.target_id: log.changes for log in settlement_logs if log.target_id and isinstance(log.changes, dict)}
+
+        active_logs = AuditLog.objects.filter(user=user, target_model="ActiveRoute").order_by("created_at")  # type: ignore
+        active_routes_map = {log.target_id: log.changes for log in active_logs if log.target_id and isinstance(log.changes, dict) and log.changes.get("isStarted")}
+
+        return success_response(
+            data={
+                "settlements": settlements_map,
+                "active_routes": active_routes_map,
+            },
+            message="Route settlements synchronized successfully across all devices."
         )
 
 

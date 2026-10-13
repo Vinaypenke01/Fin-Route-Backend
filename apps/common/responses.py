@@ -52,6 +52,7 @@ def error_response(
     message="An error occurred.",
     errors=None,
     http_status=status.HTTP_400_BAD_REQUEST,
+    status_code=None,
 ) -> Response:
     """
     Return a standardized error response.
@@ -60,10 +61,12 @@ def error_response(
         message: Human-readable error message.
         errors: Field-level error details dict.
         http_status: HTTP status code (default 400).
+        status_code: Optional status code alias for http_status.
 
     Returns:
         DRF Response with standardized error envelope.
     """
+    effective_status = status_code if status_code is not None else http_status
     return Response(
         {
             "success": False,
@@ -71,7 +74,7 @@ def error_response(
             "data": None,
             "errors": errors or {},
         },
-        status=http_status,
+        status=effective_status,
     )
 
 

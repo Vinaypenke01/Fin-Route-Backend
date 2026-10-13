@@ -9,7 +9,8 @@ CapitalService manages starting route cash and capital injections:
 
 import logging
 from datetime import date
-from django.db.models import QuerySet
+from typing import Optional
+from django.db.models import QuerySet  # type: ignore
 
 from apps.common.exceptions import BusinessRuleException
 from apps.guest_workspace.models import GuestWorkspace, CapitalEntry
@@ -36,7 +37,7 @@ class CapitalService:
         if amount <= 0:
             raise BusinessRuleException("Capital amount must be greater than ₹0.")
 
-        entry = CapitalEntry.objects.create(
+        entry = CapitalEntry.objects.create(  # type: ignore
             workspace=workspace,
             entry_date=entry_date,
             amount=amount,
@@ -49,12 +50,12 @@ class CapitalService:
     @staticmethod
     def get_capital_entries(
         workspace: GuestWorkspace,
-        entry_date: date = None,
+        entry_date: Optional[date] = None,
     ) -> QuerySet:
         """
         Fetch capital entries for the workspace, optionally filtered by date.
         """
-        qs = CapitalEntry.objects.filter(workspace=workspace)
+        qs = CapitalEntry.objects.filter(workspace=workspace)  # type: ignore
         if entry_date:
             qs = qs.filter(entry_date=entry_date)
         return qs.select_related("added_by")
@@ -65,8 +66,8 @@ class CapitalService:
         Delete a capital entry by public_id.
         """
         try:
-            entry = CapitalEntry.objects.get(workspace=workspace, public_id=public_id)
+            entry = CapitalEntry.objects.get(workspace=workspace, public_id=public_id)  # type: ignore
             entry.delete()
             return True
-        except CapitalEntry.DoesNotExist:
+        except CapitalEntry.DoesNotExist:  # type: ignore
             raise BusinessRuleException("Capital entry not found.")

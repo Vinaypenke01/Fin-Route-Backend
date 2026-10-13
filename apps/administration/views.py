@@ -600,7 +600,7 @@ class AdminReviewDetailView(APIView):
         try:
             review = CustomerReview.objects.get(pk=pk)
         except CustomerReview.DoesNotExist:
-            return error_response(message="Review not found.", status_code=404)
+            return error_response(message="Review not found.", http_status=404)
 
         status_val = request.data.get("status")
         if status_val in ["approved", "rejected", "pending"]:
@@ -655,7 +655,7 @@ class AdminUpgradeRequestDetailView(APIView):
         try:
             req_obj = PlanUpgradeRequest.objects.select_related("workspace").get(pk=pk)
         except PlanUpgradeRequest.DoesNotExist:
-            return error_response(message="Upgrade request not found.", status_code=404)
+            return error_response(message="Upgrade request not found.", http_status=404)
 
         new_status = request.data.get("status")
         admin_notes = request.data.get("admin_notes", "")
